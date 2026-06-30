@@ -21,6 +21,14 @@ INDEX = (
     "testate_search_index.csv"
 )
 
+
+TAXA_INDEX = (
+    BASE_DIR /
+    "data" /
+    "processed" /
+    "taxa_abundance.csv"
+)
+
 app = FastAPI()
 
 app.add_middleware(
@@ -35,6 +43,16 @@ print("Loading:", INDEX)
 print("Exists:", INDEX.exists())
 
 df = pd.read_csv(INDEX)
+
+print("Loading taxa:", TAXA_INDEX)
+print("Taxa exists:", TAXA_INDEX.exists())
+
+taxa_df = pd.read_csv(TAXA_INDEX)
+
+taxa_df["abundance"] = pd.to_numeric(
+    taxa_df["abundance"],
+    errors="coerce"
+)
 
 for col in ["pH", "water_table_depth", "altitude"]:
     if col in df.columns:
@@ -135,10 +153,67 @@ def run_environmental_pca(df):
     }
 
 
+def lump_taxon_name(name: str, level: str = "genus"):
+    if not isinstance(name, str):
+        return "Unknown"
+
+    name = name.strip()
+
+    if not name:
+        return "Unknown"
+
+    if level == "genus":
+        return name.split()[0]
+
+    return name
+
+
+def compute_taxa_lumping(df, level="genus"):
+    # Change these names if your CSV uses different column names
+    taxon_col = "taxon_name"
+    abundance_col = "abundance"
+
+    if taxon_col not in df.columns:
+        return {
+            "error": f"Missing column: {taxon_col}",
+            "available_columns": list(df.columns),
+        }
+
+    if abundance_col not in df.columns:
+        return {
+            "error": f"Missing column: {abundance_col}",
+            "available_columns": list(df.columns),
+        }
+
+    temp = df[[taxon_col, abundance_col]].copy()
+
+    temp[abundance_col] = pd.to_numeric(
+        temp[abundance_col],
+        errors="coerce"
+    ).fillna(0)
+
+    temp["lumped_taxon"] = temp[taxon_col].apply(
+        lambda x: lump_taxon_name(x, level)
+    )
+
+    result = (
+        temp.groupby("lumped_taxon")[abundance_col]
+        .sum()
+        .reset_index()
+        .sort_values(abundance_col, ascending=False)
+    )
+
+    return result.head(100).to_dict(orient="records")
+
+
+
+
+
+
+
 @app.get("/")
 def root():
     return {"status": "running"}
-
 
 @app.get("/summary")
 def summary():
@@ -177,6 +252,28 @@ def correlation(
 @app.get("/pca/environment")
 def environmental_pca():
     return run_environmental_pca(df)
+
+
+@app.get("/taxa/lumped")
+def taxa_lumped(level: str = "genus"):
+    return compute_taxa_lumping(taxa_df, level)
+
+
+@app.get("/taxa/top")
+def taxa_top(limit: int = 25):
+    temp = taxa_df.dropna(
+        subset=["taxon_name", "abundance"]
+    ).copy()
+
+    result = (
+        temp.groupby("taxon_name")["abundance"]
+        .sum()
+        .reset_index()
+        .sort_values("abundance", ascending=False)
+        .head(limit)
+    )
+
+    return result.to_dict(orient="records")
 
 @app.get("/search")
 def search(
@@ -220,10 +317,16 @@ def search(
 
     result = result.copy()
 
-    result[["longitude", "latitude"]] = (
-        result["geography"]
-        .apply(lambda g: pd.Series(get_lon_lat(g)))
-    )
+    if result.empty:
+        return []
+
+    if "geography" in result.columns:
+        coords = result["geography"].apply(get_lon_lat)
+        result["longitude"] = coords.apply(lambda x: x[0])
+        result["latitude"] = coords.apply(lambda x: x[1])
+    else:
+        result["longitude"] = None
+        result["latitude"] = None
 
     if lat_min is not None:
         result = result[
