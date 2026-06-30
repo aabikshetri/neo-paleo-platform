@@ -275,6 +275,36 @@ def taxa_top(limit: int = 25):
 
     return result.to_dict(orient="records")
 
+@app.get("/taxa/by-samples")
+def taxa_by_samples(sampleids: str, level: str = "genus", limit: int = 25):
+    ids = [
+        int(x)
+        for x in sampleids.split(",")
+        if x.strip().isdigit()
+    ]
+
+    temp = taxa_df[
+        taxa_df["sampleid"].isin(ids)
+    ].copy()
+
+    if temp.empty:
+        return []
+
+    temp["lumped_taxon"] = temp["taxon_name"].apply(
+        lambda x: lump_taxon_name(x, level)
+    )
+
+    result = (
+        temp.groupby("lumped_taxon")["abundance"]
+        .sum()
+        .reset_index()
+        .sort_values("abundance", ascending=False)
+        .head(limit)
+    )
+
+    return result.to_dict(orient="records")
+
+
 @app.get("/search")
 def search(
     ph_min: float | None = None,
