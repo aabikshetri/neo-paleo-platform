@@ -59,6 +59,59 @@ export type AnalogueResult = {
   matches: AnalogueMatch[];
 };
 
+export type NmdsPoint = {
+  sampleid: number;
+  nmds1: number;
+  nmds2: number;
+  nmds3?: number | null;
+  sitename?: string | null;
+  pH?: number | null;
+  water_table_depth?: number | null;
+  dominant_genus: string;
+  highlight?: "target" | "analogue" | null;
+};
+
+export type NmdsResult = {
+  error?: string;
+  method?: string;
+  dimensions?: number;
+  stress?: number;
+  stress_kind?: string;
+  iterations?: number;
+  converged?: boolean;
+  sample_count?: number;
+  genus_count?: number;
+  removed_genus_count?: number;
+  sampled?: boolean;
+  available_sample_count?: number;
+  prevalence?: number;
+  random_seed?: number;
+  n_init?: number;
+  sampling_method?: string;
+  stress_by_dimension?: Record<string, number>;
+  target_sampleid?: number | null;
+  shepard?: {
+    bray_curtis: number[];
+    ordination_distance: number[];
+    monotonic_disparity: number[];
+  };
+  renormalized_after_filtering?: boolean;
+  sensitivity?: {
+    initializations: Array<{
+      random_seed: number;
+      stress: number;
+      procrustes_disparity: number;
+    }>;
+    prevalence: Array<{
+      prevalence: number;
+      genus_count: number;
+      sample_count: number;
+      distance_spearman: number | null;
+    }>;
+  };
+  points: NmdsPoint[];
+};
+
 const profileRequests = new Map<string, Promise<TaxaSampleProfile[]>>();
 
 export async function getTaxaBySamples(
@@ -136,6 +189,31 @@ export async function findModernAnalogues(
     limit,
     exclude_same_site: excludeSameSite,
     exclude_same_doi: excludeSameDoi,
+  });
+  return response.data;
+}
+
+export async function runNmds(
+  sampleids: number[],
+  settings: {
+    maxSamples: number;
+    prevalence: number;
+    randomSeed: number;
+    nInit: number;
+    dimensions: number;
+    targetSampleid?: number | null;
+    runSensitivity: boolean;
+  }
+): Promise<NmdsResult> {
+  const response = await axios.post(`${API}/calibration/nmds`, {
+    sampleids,
+    max_samples: settings.maxSamples,
+    prevalence: settings.prevalence,
+    random_seed: settings.randomSeed,
+    n_init: settings.nInit,
+    dimensions: settings.dimensions,
+    target_sampleid: settings.targetSampleid,
+    run_sensitivity: settings.runSensitivity,
   });
   return response.data;
 }

@@ -10,9 +10,42 @@ import LinkedEnvironmentalExplorer from "../components/visualization/LinkedEnvir
 import ViewportMount from "../components/visualization/ViewportMount";
 import CalibrationQualityPanel from "../components/analysis/CalibrationQualityPanel";
 import ModernAnalogueSearch from "../components/analysis/ModernAnalogueSearch";
+import CommunityNmds from "../components/analysis/CommunityNmds";
 
 import { searchDatasets } from "../api/search";
 import { getTaxaBySamples } from "../api/taxa";
+
+type AnalysisGroupProps = {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+};
+
+function AnalysisGroup({
+  title,
+  description,
+  children,
+  defaultOpen = false,
+}: AnalysisGroupProps) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <details
+      className="analysis-group"
+      open={isOpen}
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span>
+          <strong>{title}</strong>
+          <small>{description}</small>
+        </span>
+      </summary>
+      <div className="analysis-group__content">{children}</div>
+    </details>
+  );
+}
 
 export default function DatasetExplorer() {
   const [rows, setRows] = useState<any[]>([]);
@@ -152,36 +185,34 @@ export default function DatasetExplorer() {
 
       <SummaryCards rows={selectedRows} />
 
-      <div
-        style={{
-          border: "1px solid #333",
-          borderRadius: "10px",
-          padding: "20px",
-          marginBottom: "30px",
-        }}
+      <AnalysisGroup
+        title="Data quality"
+        description="Check completeness and calibration coverage before interpreting results."
+        defaultOpen
       >
-        <CalibrationQualityPanel rows={selectedRows} />
-      </div>
+        <div className="analysis-panel">
+          <CalibrationQualityPanel rows={selectedRows} />
+        </div>
+      </AnalysisGroup>
 
-      <div
-        style={{
-          border: "1px solid #333",
-          borderRadius: "10px",
-          padding: "20px",
-          marginBottom: "30px",
-        }}
+      <AnalysisGroup
+        title="Core analysis"
+        description="Compare assemblages and examine community structure."
+        defaultOpen
       >
-        <ModernAnalogueSearch rows={selectedRows} />
-      </div>
+        <div className="analysis-panel">
+          <ModernAnalogueSearch rows={selectedRows} />
+        </div>
+        <div className="analysis-panel">
+          <CommunityNmds rows={selectedRows} />
+        </div>
+      </AnalysisGroup>
 
-      <div
-        style={{
-          border: "1px solid #333",
-          borderRadius: "10px",
-          padding: "20px",
-          marginBottom: "30px",
-        }}
+      <AnalysisGroup
+        title="Exploratory visualization"
+        description="Inspect taxon composition, environmental gradients, and geography."
       >
+        <div className="analysis-panel">
         <h2>Taxa Composition</h2>
 
         <p>
@@ -201,7 +232,7 @@ export default function DatasetExplorer() {
             referenceRows={allRows}
           />
         )}
-      </div>
+        </div>
 
       {bbox && (
         <div
@@ -224,14 +255,7 @@ export default function DatasetExplorer() {
         </div>
       )}
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "20px",
-        }}
-      >
+      <div className="analysis-results-row">
         <h3>
           {selectedRows.length.toLocaleString()} Samples Found
         </h3>
@@ -239,14 +263,7 @@ export default function DatasetExplorer() {
         <DownloadCSV rows={selectedRows} />
       </div>
 
-      <div
-        style={{
-          border: "1px solid #333",
-          borderRadius: "10px",
-          padding: "20px",
-          marginBottom: "30px",
-        }}
-      >
+      <div className="analysis-panel">
         <h2>Environmental Explorer</h2>
 
         <p>
@@ -284,14 +301,7 @@ export default function DatasetExplorer() {
       </div>
 
       {selectedSite && (
-        <div
-          style={{
-            border: "1px solid #333",
-            borderRadius: "10px",
-            padding: "20px",
-            marginBottom: "30px",
-          }}
-        >
+        <div className="analysis-panel">
           <h2>Site Information</h2>
 
           <p><strong>Site Name:</strong> {selectedSite.sitename}</p>
@@ -304,6 +314,7 @@ export default function DatasetExplorer() {
           <p><strong>Longitude:</strong> {selectedSite.longitude}</p>
         </div>
       )}
+      </AnalysisGroup>
     </div>
   );
 }

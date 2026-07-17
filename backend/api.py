@@ -1,4 +1,5 @@
 import json
+import inspect
 from pathlib import Path
 
 import pandas as pd
@@ -8,10 +9,14 @@ from pydantic import BaseModel
 
 import numpy as np
 
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, spearmanr
+from scipy.spatial.distance import pdist, squareform
+from scipy.spatial import procrustes
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+from sklearn.manifold import MDS
+from sklearn.isotonic import IsotonicRegression
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -98,6 +103,13 @@ taxa_df["abundance"] = pd.to_numeric(
 for col in ["pH", "water_table_depth", "altitude"]:
     if col in df.columns:
         df[col] = pd.to_numeric(df[col], errors="coerce")
+
+# Neotoma exports can contain numeric missing-value sentinels. Remove them
+# before summaries, filters, quality checks, and environmental coloring.
+if "pH" in df.columns:
+    df.loc[(df["pH"] < 0) | (df["pH"] > 14), "pH"] = np.nan
+if "water_table_depth" in df.columns:
+    df.loc[df["water_table_depth"] <= -90, "water_table_depth"] = np.nan
 
 
 def get_lon_lat(geo):
@@ -506,6 +518,17 @@ class AnalogueRequest(BaseModel):
     exclude_same_doi: bool = True
 
 
+class NmdsRequest(BaseModel):
+    sampleids: list[int]
+    max_samples: int = 500
+    prevalence: float = 0.02
+    random_seed: int = 42
+    n_init: int = 10
+    dimensions: int = 2
+    target_sampleid: int | None = None
+    run_sensitivity: bool = True
+
+
 @app.post("/calibration/quality")
 def calibration_quality(request: CalibrationRequest):
     ids = list(dict.fromkeys(request.sampleids))[:5000]
@@ -660,6 +683,255 @@ def modern_analogues(request: AnalogueRequest):
         "method": "Bray-Curtis dissimilarity on sample-normalized genus percentages",
         "target_composition": composition_records(target),
         "matches": matches,
+    }
+
+
+@app.post("/calibration/nmds")
+def calibration_nmds(request: NmdsRequest):
+    ids = list(dict.fromkeys(request.sampleids))[:5000]
+    selected = genus_profiles_df[genus_profiles_df["sampleid"].isin(ids)]
+    taxa_sample_ids = set(selected["sampleid"].astype(int))
+    available_ids = [sampleid for sampleid in ids if sampleid in taxa_sample_ids]
+    if len(available_ids) < 3:
+        return {"error": "NMDS requires at least three samples with taxa data.", "points": []}
+
+    max_samples = max(3, min(request.max_samples, 1000))
+    sampled = len(available_ids) > max_samples
+    if sampled:
+        rng = np.random.default_rng(request.random_seed)
+        site_rows = (
+            df[df["sampleid"].isin(available_ids)][["sampleid", "siteid"]]
+            .drop_duplicates("sampleid")
+        )
+        site_for_sample = dict(zip(site_rows["sampleid"].astype(int), site_rows["siteid"]))
+        site_groups = {}
+        for sampleid in available_ids:
+            site = site_for_sample.get(sampleid)
+            site_key = str(site) if pd.notna(site) else f"unknown-{sampleid}"
+            site_groups.setdefault(site_key, []).append(sampleid)
+        group_keys = list(site_groups)
+        rng.shuffle(group_keys)
+        for group in site_groups.values():
+            rng.shuffle(group)
+        analysis_ids = []
+        depth = 0
+        while len(analysis_ids) < max_samples:
+            added = False
+            for key in group_keys:
+                group = site_groups[key]
+                if depth < len(group):
+                    analysis_ids.append(group[depth])
+                    added = True
+                    if len(analysis_ids) == max_samples:
+                        break
+            if not added:
+                break
+            depth += 1
+        if (
+            request.target_sampleid in available_ids
+            and request.target_sampleid not in analysis_ids
+        ):
+            analysis_ids[-1] = request.target_sampleid
+    else:
+        analysis_ids = available_ids
+
+    unfiltered_matrix = (
+        selected[selected["sampleid"].isin(analysis_ids)]
+        .pivot_table(index="sampleid", columns="lumped_taxon", values="percentage", fill_value=0)
+        .reindex(analysis_ids)
+    )
+    original_genus_count = unfiltered_matrix.shape[1]
+
+    def prepare_matrix(prevalence):
+        minimum_occurrence = max(
+            1,
+            int(np.ceil(len(unfiltered_matrix) * max(0, min(prevalence, 1)))),
+        )
+        prepared = unfiltered_matrix.loc[
+            :, (unfiltered_matrix > 0).sum(axis=0) >= minimum_occurrence
+        ].copy()
+        prepared = prepared.loc[prepared.sum(axis=1) > 0]
+        # Taxon filtering changes retained totals by different amounts across
+        # samples. Restore every retained assemblage to a 100% composition
+        # before calculating Bray-Curtis dissimilarities.
+        prepared = prepared.div(prepared.sum(axis=1), axis=0) * 100
+        return prepared
+
+    matrix = prepare_matrix(request.prevalence)
+    if len(matrix) < 3 or matrix.shape[1] < 2:
+        return {"error": "Too few samples or genera remain after prevalence filtering.", "points": []}
+
+    condensed_distances = pdist(matrix.to_numpy(), metric="braycurtis")
+    distances = squareform(condensed_distances)
+    supports_normalized_stress = "normalized_stress" in inspect.signature(MDS).parameters
+
+    def fit_nmds(dimensions, n_init, random_seed):
+        options = {
+            "n_components": dimensions,
+            "metric": False,
+            "dissimilarity": "precomputed",
+            "random_state": random_seed,
+            "n_init": n_init,
+            "max_iter": 500,
+            "eps": 1e-6,
+        }
+        if supports_normalized_stress:
+            options["normalized_stress"] = True
+        fitted = MDS(**options)
+        fitted_coordinates = fitted.fit_transform(distances)
+        if supports_normalized_stress:
+            fitted_stress = float(fitted.stress_)
+        else:
+            denominator = float(np.square(distances).sum())
+            fitted_stress = float(np.sqrt(fitted.stress_ / denominator)) if denominator > 0 else 0.0
+        return fitted, fitted_coordinates, fitted_stress
+
+    dimensions = 3 if request.dimensions == 3 else 2
+    model, coordinates, stress = fit_nmds(
+        dimensions,
+        max(1, min(request.n_init, 20)),
+        request.random_seed,
+    )
+    comparison_dimension = 3 if dimensions == 2 else 2
+    _, _, comparison_stress = fit_nmds(
+        comparison_dimension,
+        max(1, min(request.n_init, 20)),
+        request.random_seed,
+    )
+    stress_by_dimension = {
+        str(dimensions): stress,
+        str(comparison_dimension): comparison_stress,
+    }
+    stress_kind = "normalized Stress-1" if supports_normalized_stress else "approximated normalized stress"
+
+    ordination_distances = pdist(coordinates, metric="euclidean")
+    isotonic = IsotonicRegression(increasing=True, out_of_bounds="clip")
+    monotonic_disparities = isotonic.fit_transform(
+        condensed_distances,
+        ordination_distances,
+    )
+    pair_count = min(2000, len(condensed_distances))
+    pair_rng = np.random.default_rng(request.random_seed)
+    pair_indexes = (
+        np.sort(pair_rng.choice(len(condensed_distances), size=pair_count, replace=False))
+        if len(condensed_distances) > pair_count
+        else np.arange(len(condensed_distances))
+    )
+
+    initialization_sensitivity = []
+    prevalence_sensitivity = []
+    if request.run_sensitivity:
+        for seed in [request.random_seed + 1, request.random_seed + 2]:
+            _, alternate_coordinates, alternate_stress = fit_nmds(
+                dimensions,
+                max(1, min(request.n_init, 20)),
+                seed,
+            )
+            _, _, disparity = procrustes(coordinates, alternate_coordinates)
+            initialization_sensitivity.append({
+                "random_seed": seed,
+                "stress": alternate_stress,
+                "procrustes_disparity": float(disparity),
+            })
+
+        tested_prevalence = sorted({0.0, float(request.prevalence), 0.05})
+        for prevalence in tested_prevalence:
+            alternate_matrix = prepare_matrix(prevalence)
+            common_ids = matrix.index.intersection(alternate_matrix.index)
+            if len(common_ids) < 3 or alternate_matrix.shape[1] < 2:
+                correlation = None
+            else:
+                primary_common_distances = pdist(
+                    matrix.loc[common_ids].to_numpy(), metric="braycurtis"
+                )
+                alternate_distances = pdist(
+                    alternate_matrix.loc[common_ids].to_numpy(), metric="braycurtis"
+                )
+                correlation_value = spearmanr(
+                    primary_common_distances,
+                    alternate_distances,
+                ).statistic
+                correlation = (
+                    float(correlation_value)
+                    if np.isfinite(correlation_value)
+                    else None
+                )
+            prevalence_sensitivity.append({
+                "prevalence": prevalence,
+                "genus_count": int(alternate_matrix.shape[1]),
+                "sample_count": int(len(common_ids)),
+                "distance_spearman": correlation,
+            })
+
+    target_id = request.target_sampleid if request.target_sampleid in matrix.index else None
+    analogue_ids = set()
+    if target_id is not None:
+        target_position = matrix.index.get_loc(target_id)
+        ranked_positions = np.argsort(distances[target_position])
+        ranked_ids = [
+            int(matrix.index[position])
+            for position in ranked_positions
+            if position != target_position
+        ]
+        analogue_ids = set(ranked_ids[:5])
+
+    metadata = (
+        df[df["sampleid"].isin(matrix.index)]
+        .drop_duplicates("sampleid")
+        .set_index("sampleid")
+    )
+    dominant = matrix.idxmax(axis=1)
+    points = []
+    for position, sampleid in enumerate(matrix.index):
+        row = metadata.loc[sampleid] if sampleid in metadata.index else None
+
+        def value(column):
+            if row is None or column not in row or pd.isna(row[column]):
+                return None
+            item = row[column]
+            return item.item() if hasattr(item, "item") else item
+
+        points.append({
+            "sampleid": int(sampleid),
+            "nmds1": float(coordinates[position, 0]),
+            "nmds2": float(coordinates[position, 1]),
+            "nmds3": float(coordinates[position, 2]) if dimensions == 3 else None,
+            "sitename": value("sitename"),
+            "pH": value("pH"),
+            "water_table_depth": value("water_table_depth"),
+            "dominant_genus": str(dominant.loc[sampleid]),
+            "highlight": "target" if sampleid == target_id else "analogue" if int(sampleid) in analogue_ids else None,
+        })
+
+    return {
+        "method": f"{dimensions}D non-metric multidimensional scaling of Bray-Curtis dissimilarities",
+        "dimensions": dimensions,
+        "stress": stress,
+        "stress_kind": stress_kind,
+        "iterations": int(getattr(model, "n_iter_", 0)),
+        "converged": int(getattr(model, "n_iter_", 500)) < 500,
+        "sample_count": len(matrix),
+        "genus_count": matrix.shape[1],
+        "removed_genus_count": original_genus_count - matrix.shape[1],
+        "sampled": sampled,
+        "available_sample_count": len(available_ids),
+        "prevalence": request.prevalence,
+        "random_seed": request.random_seed,
+        "n_init": max(1, min(request.n_init, 20)),
+        "sampling_method": "site-stratified round-robin" if sampled else "all eligible samples",
+        "stress_by_dimension": stress_by_dimension,
+        "target_sampleid": target_id,
+        "shepard": {
+            "bray_curtis": condensed_distances[pair_indexes].astype(float).tolist(),
+            "ordination_distance": ordination_distances[pair_indexes].astype(float).tolist(),
+            "monotonic_disparity": monotonic_disparities[pair_indexes].astype(float).tolist(),
+        },
+        "renormalized_after_filtering": True,
+        "sensitivity": {
+            "initializations": initialization_sensitivity,
+            "prevalence": prevalence_sensitivity,
+        },
+        "points": points,
     }
 
 

@@ -66,6 +66,76 @@ body {
   margin: 0;
 }
 
+.analysis-group {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 24px;
+  overflow: clip;
+  text-align: left;
+}
+
+.analysis-group > summary {
+  cursor: pointer;
+  padding: 18px 20px;
+  color: var(--text-h);
+  background: var(--social-bg);
+}
+
+.analysis-group > summary span {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-left: 6px;
+}
+
+.analysis-group > summary strong {
+  font-weight: 500;
+}
+
+.analysis-group > summary small {
+  color: var(--text);
+  font-size: 0.84rem;
+}
+
+.analysis-group[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.analysis-group__content {
+  padding: 20px;
+}
+
+.analysis-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.analysis-panel:last-child {
+  margin-bottom: 0;
+}
+
+.analysis-results-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 640px) {
+  .analysis-group__content,
+  .analysis-panel {
+    padding: 14px;
+  }
+
+  .analysis-results-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 h1,
 h2 {
   font-family: var(--heading);
