@@ -8,6 +8,8 @@ import SiteMap from "../components/visualization/SiteMap";
 import TaxaCompositionChart from "../components/visualization/TaxaCompositionChart";
 import LinkedEnvironmentalExplorer from "../components/visualization/LinkedEnvironmentalExplorer";
 import ViewportMount from "../components/visualization/ViewportMount";
+import CalibrationQualityPanel from "../components/analysis/CalibrationQualityPanel";
+import ModernAnalogueSearch from "../components/analysis/ModernAnalogueSearch";
 
 import { searchDatasets } from "../api/search";
 import { getTaxaBySamples } from "../api/taxa";
@@ -149,6 +151,28 @@ export default function DatasetExplorer() {
       />
 
       <SummaryCards rows={selectedRows} />
+
+      <div
+        style={{
+          border: "1px solid #333",
+          borderRadius: "10px",
+          padding: "20px",
+          marginBottom: "30px",
+        }}
+      >
+        <CalibrationQualityPanel rows={selectedRows} />
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #333",
+          borderRadius: "10px",
+          padding: "20px",
+          marginBottom: "30px",
+        }}
+      >
+        <ModernAnalogueSearch rows={selectedRows} />
+      </div>
 
       <div
         style={{

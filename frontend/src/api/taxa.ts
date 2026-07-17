@@ -14,6 +14,51 @@ export type TaxaSampleProfile = {
   }>;
 };
 
+export type CalibrationQuality = {
+  sample_count: number;
+  site_count: number;
+  dataset_count?: number;
+  samples_with_doi?: number;
+  unique_doi_count?: number;
+  publication_count?: number;
+  taxa_sample_count: number;
+  missing_taxa: number;
+  missing_ph: number;
+  missing_water_table: number;
+  missing_doi: number;
+  low_richness_samples: number;
+  median_genus_richness: number | null;
+  ph_range: { min: number | null; max: number | null };
+  water_table_range: { min: number | null; max: number | null };
+  water_table_units: string[];
+};
+
+export type AnalogueMatch = {
+  sampleid: number;
+  bray_curtis: number;
+  analogue_class: "close" | "possible" | "poor";
+  sitename?: string | null;
+  datasetid?: number | null;
+  doi?: string | null;
+  pH?: number | null;
+  water_table_depth?: number | null;
+  water_table_depth_units?: string | null;
+  shared_genera: string[];
+  composition: Array<{ lumped_taxon: string; percentage: number }>;
+};
+
+export type AnalogueResult = {
+  target_sampleid?: number;
+  candidate_count?: number;
+  excluded_candidate_count?: number;
+  exclude_same_site?: boolean;
+  exclude_same_doi?: boolean;
+  method?: string;
+  target_composition?: Array<{ lumped_taxon: string; percentage: number }>;
+  error?: string;
+  matches: AnalogueMatch[];
+};
+
 const profileRequests = new Map<string, Promise<TaxaSampleProfile[]>>();
 
 export async function getTaxaBySamples(
@@ -69,4 +114,28 @@ export async function getTaxaSampleProfiles(
   });
   profileRequests.set(key, request);
   return request;
+}
+
+export async function getCalibrationQuality(
+  sampleids: number[]
+): Promise<CalibrationQuality> {
+  const response = await axios.post(`${API}/calibration/quality`, { sampleids });
+  return response.data;
+}
+
+export async function findModernAnalogues(
+  targetSampleid: number,
+  calibrationSampleids: number[],
+  limit = 10,
+  excludeSameSite = true,
+  excludeSameDoi = true
+): Promise<AnalogueResult> {
+  const response = await axios.post(`${API}/calibration/modern-analogues`, {
+    target_sampleid: targetSampleid,
+    calibration_sampleids: calibrationSampleids,
+    limit,
+    exclude_same_site: excludeSameSite,
+    exclude_same_doi: excludeSameDoi,
+  });
+  return response.data;
 }

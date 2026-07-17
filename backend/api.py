@@ -494,6 +494,175 @@ class SampleProfilesRequest(BaseModel):
     limit: int = 8
 
 
+class CalibrationRequest(BaseModel):
+    sampleids: list[int]
+
+
+class AnalogueRequest(BaseModel):
+    target_sampleid: int
+    calibration_sampleids: list[int]
+    limit: int = 10
+    exclude_same_site: bool = True
+    exclude_same_doi: bool = True
+
+
+@app.post("/calibration/quality")
+def calibration_quality(request: CalibrationRequest):
+    ids = list(dict.fromkeys(request.sampleids))[:5000]
+    selected = df[df["sampleid"].isin(ids)].drop_duplicates("sampleid").copy()
+    profiles = genus_profiles_df[genus_profiles_df["sampleid"].isin(ids)]
+    sample_count = len(selected)
+    taxa_ids = set(profiles["sampleid"].astype(int).tolist())
+    richness = profiles.groupby("sampleid")["lumped_taxon"].nunique()
+
+    def missing_count(column):
+        return int(selected[column].isna().sum()) if column in selected else sample_count
+
+    def numeric_range(column):
+        values = pd.to_numeric(selected[column], errors="coerce").dropna()
+        if values.empty:
+            return {"min": None, "max": None}
+        return {"min": float(values.min()), "max": float(values.max())}
+
+    units = []
+    if "water_table_depth_units" in selected:
+        units = sorted(
+            selected["water_table_depth_units"].dropna().astype(str).str.strip().unique().tolist()
+        )
+    doi_values = (
+        selected["doi"].dropna().astype(str).str.split(";").explode().str.strip().str.lower()
+    )
+    doi_values = doi_values[doi_values.ne("")]
+
+    return {
+        "sample_count": sample_count,
+        "site_count": int(selected["siteid"].nunique()),
+        "dataset_count": int(selected["datasetid"].nunique()),
+        "samples_with_doi": sample_count - missing_count("doi"),
+        "unique_doi_count": int(doi_values.nunique()),
+        "taxa_sample_count": len(taxa_ids),
+        "missing_taxa": sample_count - len(taxa_ids),
+        "missing_ph": missing_count("pH"),
+        "missing_water_table": missing_count("water_table_depth"),
+        "missing_doi": missing_count("doi"),
+        "low_richness_samples": int((richness < 5).sum()),
+        "median_genus_richness": float(richness.median()) if not richness.empty else None,
+        "ph_range": numeric_range("pH"),
+        "water_table_range": numeric_range("water_table_depth"),
+        "water_table_units": units,
+    }
+
+
+@app.post("/calibration/modern-analogues")
+def modern_analogues(request: AnalogueRequest):
+    candidate_ids = list(dict.fromkeys(request.calibration_sampleids))[:5000]
+    candidate_ids = [sampleid for sampleid in candidate_ids if sampleid != request.target_sampleid]
+    original_candidate_count = len(candidate_ids)
+    sample_metadata = (
+        df[df["sampleid"].isin([request.target_sampleid, *candidate_ids])]
+        .drop_duplicates("sampleid")
+        .set_index("sampleid")
+    )
+    if request.target_sampleid not in sample_metadata.index:
+        return {"error": "The target sample metadata is unavailable.", "matches": []}
+
+    target_metadata = sample_metadata.loc[request.target_sampleid]
+    target_siteid = target_metadata.get("siteid")
+    target_doi_value = target_metadata.get("doi")
+    target_dois = {
+        value.strip().lower()
+        for value in str(target_doi_value if pd.notna(target_doi_value) else "").split(";")
+        if value.strip()
+    }
+
+    def retain_candidate(sampleid):
+        if sampleid not in sample_metadata.index:
+            return False
+        candidate = sample_metadata.loc[sampleid]
+        if (
+            request.exclude_same_site
+            and pd.notna(target_siteid)
+            and candidate.get("siteid") == target_siteid
+        ):
+            return False
+        if request.exclude_same_doi and target_dois:
+            candidate_doi_value = candidate.get("doi")
+            candidate_dois = {
+                value.strip().lower()
+                for value in str(candidate_doi_value if pd.notna(candidate_doi_value) else "").split(";")
+                if value.strip()
+            }
+            if target_dois.intersection(candidate_dois):
+                return False
+        return True
+
+    candidate_ids = [sampleid for sampleid in candidate_ids if retain_candidate(sampleid)]
+    selected_ids = [request.target_sampleid, *candidate_ids]
+    selected = genus_profiles_df[genus_profiles_df["sampleid"].isin(selected_ids)]
+    if request.target_sampleid not in set(selected["sampleid"].astype(int)):
+        return {"error": "The target sample has no usable taxa composition.", "matches": []}
+
+    matrix = selected.pivot_table(
+        index="sampleid", columns="lumped_taxon", values="percentage", fill_value=0
+    )
+    if request.target_sampleid not in matrix.index:
+        return {"error": "The target sample has no usable taxa composition.", "matches": []}
+
+    available = [sampleid for sampleid in candidate_ids if sampleid in matrix.index]
+    if not available:
+        return {"error": "No calibration samples with taxa data are available.", "matches": []}
+
+    target = matrix.loc[request.target_sampleid]
+    distances = matrix.loc[available].sub(target, axis="columns").abs().sum(axis=1) / 200
+    best = distances.nsmallest(max(1, min(request.limit, 25)))
+    metadata = sample_metadata[sample_metadata.index.isin(best.index)]
+
+    def composition_records(values, limit=10):
+        return [
+            {"lumped_taxon": str(taxon), "percentage": float(percentage)}
+            for taxon, percentage in values[values > 0].nlargest(limit).items()
+        ]
+
+    matches = []
+    for sampleid, distance in best.items():
+        candidate = matrix.loc[sampleid]
+        shared = pd.concat([target.rename("target"), candidate.rename("candidate")], axis=1)
+        shared["minimum"] = shared[["target", "candidate"]].min(axis=1)
+        shared_genera = shared[shared["minimum"] > 0].nlargest(5, "minimum").index.tolist()
+        row = metadata.loc[sampleid] if sampleid in metadata.index else None
+
+        def metadata_value(column):
+            if row is None or column not in row or pd.isna(row[column]):
+                return None
+            value = row[column]
+            return value.item() if hasattr(value, "item") else value
+
+        matches.append({
+            "sampleid": int(sampleid),
+            "bray_curtis": float(distance),
+            "analogue_class": "close" if distance <= 0.2 else "possible" if distance <= 0.4 else "poor",
+            "sitename": metadata_value("sitename"),
+            "datasetid": metadata_value("datasetid"),
+            "doi": metadata_value("doi"),
+            "pH": metadata_value("pH"),
+            "water_table_depth": metadata_value("water_table_depth"),
+            "water_table_depth_units": metadata_value("water_table_depth_units"),
+            "shared_genera": shared_genera,
+            "composition": composition_records(candidate),
+        })
+
+    return {
+        "target_sampleid": request.target_sampleid,
+        "candidate_count": len(available),
+        "excluded_candidate_count": original_candidate_count - len(candidate_ids),
+        "exclude_same_site": request.exclude_same_site,
+        "exclude_same_doi": request.exclude_same_doi,
+        "method": "Bray-Curtis dissimilarity on sample-normalized genus percentages",
+        "target_composition": composition_records(target),
+        "matches": matches,
+    }
+
+
 @app.post("/taxa/sample-profiles")
 def taxa_sample_profiles(request: SampleProfilesRequest):
     ids = list(dict.fromkeys(request.sampleids))[:1000]
