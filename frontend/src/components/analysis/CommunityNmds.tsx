@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import { runNmds, type NmdsPoint, type NmdsResult } from "../../api/taxa";
 import { taxonColor } from "../visualization/taxaColors";
@@ -33,7 +33,13 @@ function categoryGroups(points: NmdsPoint[], field: "sitename" | "dominant_genus
   return groups;
 }
 
-export default function CommunityNmds({ rows }: { rows: SampleRow[] }) {
+export default function CommunityNmds({
+  rows,
+  onSnapshotChange,
+}: {
+  rows: SampleRow[];
+  onSnapshotChange?: (snapshot: Record<string, unknown> | null) => void;
+}) {
   const ids = useMemo(
     () => Array.from(new Set(rows.flatMap((row) => row.sampleid == null ? [] : [row.sampleid]))),
     [rows]
@@ -47,12 +53,22 @@ export default function CommunityNmds({ rows }: { rows: SampleRow[] }) {
   const [colorBy, setColorBy] = useState<"pH" | "water_table_depth" | "dominant_genus" | "sitename">("pH");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<NmdsResult | null>(null);
+  const [resultKey, setResultKey] = useState("");
   const [plotRevision, setPlotRevision] = useState(0);
+  const currentAnalysisKey = JSON.stringify({
+    ids,
+    maxSamples,
+    prevalencePercent,
+    dimensions,
+    nInit,
+    targetSampleid,
+    runSensitivity,
+  });
 
   async function calculate() {
     setLoading(true);
     try {
-      setResult(await runNmds(ids, {
+      const data = await runNmds(ids, {
         maxSamples,
         prevalence: prevalencePercent / 100,
         randomSeed: 42,
@@ -60,7 +76,9 @@ export default function CommunityNmds({ rows }: { rows: SampleRow[] }) {
         dimensions,
         targetSampleid,
         runSensitivity,
-      }));
+      });
+      setResult(data);
+      setResultKey(currentAnalysisKey);
     } catch (error) {
       console.error(error);
       setResult({ error: "NMDS could not be completed. Confirm that the updated backend is running.", points: [] });
@@ -107,6 +125,7 @@ export default function CommunityNmds({ rows }: { rows: SampleRow[] }) {
     marker: {
       size: result.dimensions === 3 ? 6 : 8,
       opacity: 0.72,
+      symbol: "circle-open",
       color: result.points.map((point) => point[colorBy] ?? null),
       colorscale: "Viridis",
       showscale: true,
@@ -118,7 +137,13 @@ export default function CommunityNmds({ rows }: { rows: SampleRow[] }) {
     mode: "markers" as const,
     type: result.dimensions === 3 ? "scatter3d" as const : "scatter" as const,
     name: group,
-    marker: { size: result.dimensions === 3 ? 6 : 8, opacity: 0.72, color: taxonColor(group) },
+    marker: {
+      symbol: "circle-open",
+      size: result.dimensions === 3 ? 6 : 9,
+      opacity: 0.8,
+      color: taxonColor(group),
+      line: { color: taxonColor(group), width: 2 },
+    },
   })) : [];
   const highlightTraces = result?.points.length ? ([
     ["target", "Target sample", "diamond", "#ef4444"],
@@ -154,6 +179,39 @@ export default function CommunityNmds({ rows }: { rows: SampleRow[] }) {
   const maximumInitializationDisparity = initializationDisparities.length
     ? Math.max(...initializationDisparities)
     : null;
+
+  useEffect(() => {
+    if (!result || result.error || !result.points.length || resultKey !== currentAnalysisKey) {
+      onSnapshotChange?.(null);
+      return;
+    }
+    onSnapshotChange?.({
+      settings: {
+        max_samples: maxSamples,
+        prevalence: prevalencePercent / 100,
+        random_seed: 42,
+        n_init: nInit,
+        dimensions,
+        target_sampleid: targetSampleid,
+        run_sensitivity: runSensitivity,
+      },
+      result: {
+        method: result.method,
+        stress: result.stress,
+        stress_kind: result.stress_kind,
+        stress_by_dimension: result.stress_by_dimension,
+        sample_count: result.sample_count,
+        available_sample_count: result.available_sample_count,
+        genus_count: result.genus_count,
+        removed_genus_count: result.removed_genus_count,
+        converged: result.converged,
+        iterations: result.iterations,
+        sampling_method: result.sampling_method,
+        renormalized_after_filtering: result.renormalized_after_filtering,
+        sensitivity: result.sensitivity,
+      },
+    });
+  }, [currentAnalysisKey, dimensions, maxSamples, nInit, onSnapshotChange, prevalencePercent, result, resultKey, runSensitivity, targetSampleid]);
 
   return (
     <section>

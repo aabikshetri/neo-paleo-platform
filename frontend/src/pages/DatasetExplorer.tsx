@@ -11,6 +11,7 @@ import ViewportMount from "../components/visualization/ViewportMount";
 import CalibrationQualityPanel from "../components/analysis/CalibrationQualityPanel";
 import ModernAnalogueSearch from "../components/analysis/ModernAnalogueSearch";
 import CommunityNmds from "../components/analysis/CommunityNmds";
+import ReproducibilityPanel from "../components/analysis/ReproducibilityPanel";
 
 import { searchDatasets } from "../api/search";
 import { getTaxaBySamples } from "../api/taxa";
@@ -57,6 +58,8 @@ export default function DatasetExplorer() {
   const [taxaRows, setTaxaRows] = useState<any[]>([]);
   const [allTaxaRows, setAllTaxaRows] = useState<any[]>([]);
   const [taxaLoading, setTaxaLoading] = useState(false);
+  const [analogueSnapshot, setAnalogueSnapshot] = useState<Record<string, unknown> | null>(null);
+  const [nmdsSnapshot, setNmdsSnapshot] = useState<Record<string, unknown> | null>(null);
 
   const [filters, setFilters] = useState({
     site_contains: "",
@@ -201,10 +204,24 @@ export default function DatasetExplorer() {
         defaultOpen
       >
         <div className="analysis-panel">
-          <ModernAnalogueSearch rows={selectedRows} />
+          <ModernAnalogueSearch rows={selectedRows} onSnapshotChange={setAnalogueSnapshot} />
         </div>
         <div className="analysis-panel">
-          <CommunityNmds rows={selectedRows} />
+          <CommunityNmds rows={selectedRows} onSnapshotChange={setNmdsSnapshot} />
+        </div>
+      </AnalysisGroup>
+
+      <AnalysisGroup
+        title="Reproducibility"
+        description="Record the active dataset selection, methods, diagnostics, and results."
+      >
+        <div className="analysis-panel">
+          <ReproducibilityPanel
+            filters={filters}
+            rows={selectedRows}
+            analogueSnapshot={analogueSnapshot}
+            nmdsSnapshot={nmdsSnapshot}
+          />
         </div>
       </AnalysisGroup>
 

@@ -56,7 +56,7 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
   });
   const [selected, setSelected] = useState<SampleRow | null>(null);
   const [pinned, setPinned] = useState<SampleRow[]>([]);
-  const [colorBy, setColorBy] = useState("dominant_genus");
+  const [displayMode, setDisplayMode] = useState("selected_genus");
   const [responseVariable, setResponseVariable] = useState("water_table_depth");
   const [responseGenus, setResponseGenus] = useState("");
 
@@ -121,7 +121,7 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
   validRows.forEach((row) => {
     const profile = profileBySample.get(String(row.sampleid));
     const dominant = profile?.dominant_genus || "No taxa data";
-    const group = colorBy === "site"
+    const group = displayMode === "site"
       ? row.sitename || "Unknown site"
       : topDominantGenera.has(dominant) ? dominant : "Other genera";
     scatterGroups.set(group, [...(scatterGroups.get(group) ?? []), row]);
@@ -155,6 +155,69 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
     })
     .filter((row) => Number.isFinite(row.environmental));
 
+  const genusAbundance = (row: SampleRow) => profileBySample
+    .get(String(row.sampleid))
+    ?.composition.find((item) => item.lumped_taxon === activeGenus)
+    ?.percentage ?? 0;
+  const ringRows = validRows.filter((row) => genusAbundance(row) > 0);
+  const absentRows = validRows.filter((row) => genusAbundance(row) <= 0);
+  const ringSize = (percentage: number) =>
+    Math.max(7, Math.min(30, 5 + Math.sqrt(Math.max(percentage, 0)) * 3));
+  const environmentalTraces = displayMode === "selected_genus"
+    ? [
+        {
+          x: absentRows.map((row) => row.water_table_depth),
+          y: absentRows.map((row) => row.pH),
+          customdata: absentRows,
+          text: absentRows.map((row) => `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}`),
+          hovertemplate: `%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<br>${activeGenus}: 0.00%<extra>Not recorded</extra>`,
+          mode: "markers" as const,
+          type: "scatter" as const,
+          name: `${activeGenus} absent`,
+          marker: { color: "#94a3b8", size: 5, opacity: 0.22 },
+        },
+        {
+          x: ringRows.map((row) => row.water_table_depth),
+          y: ringRows.map((row) => row.pH),
+          customdata: ringRows,
+          text: ringRows.map((row) => `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}<br>${activeGenus}: ${genusAbundance(row).toFixed(2)}%`),
+          hovertemplate: "%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<extra></extra>",
+          mode: "markers" as const,
+          type: "scatter" as const,
+          name: activeGenus,
+          marker: {
+            symbol: "circle-open",
+            color: taxonColor(activeGenus),
+            size: ringRows.map((row) => ringSize(genusAbundance(row))),
+            opacity: 0.86,
+            line: { color: taxonColor(activeGenus), width: 2 },
+          },
+        },
+      ]
+    : Array.from(scatterGroups.entries()).map(([group, groupRows]) => ({
+        x: groupRows.map((row) => row.water_table_depth),
+        y: groupRows.map((row) => row.pH),
+        customdata: groupRows,
+        text: groupRows.map((row) => {
+          const dominant = profileBySample.get(String(row.sampleid))?.dominant_genus;
+          return `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}${dominant ? `<br>Dominant: ${dominant}` : ""}`;
+        }),
+        hovertemplate: "%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<extra></extra>",
+        mode: "markers" as const,
+        type: "scatter" as const,
+        name: group,
+        marker: {
+          symbol: "circle-open",
+          color: categoryColor(group),
+          size: 9,
+          opacity: 0.82,
+          line: { color: categoryColor(group), width: 2 },
+        },
+      }));
+
+  const positiveResponseRows = responseRows.filter((row) => row.abundance > 0);
+  const zeroResponseRows = responseRows.filter((row) => row.abundance <= 0);
+
   return (
     <div>
       <div
@@ -171,13 +234,24 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
           <h3 style={{ marginBottom: "4px" }}>pH vs water-table depth</h3>
           <p style={{ opacity: 0.72 }}>Select a point to inspect or pin its assemblage.</p>
         </div>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
         <label>
-          Color points by{" "}
-          <select value={colorBy} onChange={(event) => setColorBy(event.target.value)}>
+          Display samples as{" "}
+          <select value={displayMode} onChange={(event) => setDisplayMode(event.target.value)}>
+            <option value="selected_genus">Genus-abundance rings</option>
             <option value="dominant_genus">Dominant genus</option>
             <option value="site">Site</option>
           </select>
         </label>
+        {displayMode === "selected_genus" && (
+          <label>
+            Genus{" "}
+            <select value={activeGenus} onChange={(event) => setResponseGenus(event.target.value)}>
+              {genera.map((genus) => <option key={genus}>{genus}</option>)}
+            </select>
+          </label>
+        )}
+        </div>
       </div>
 
       {rows.length > MAX_PROFILES && (
@@ -197,22 +271,7 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
         </div>
       )}>
       <Plot
-        data={Array.from(scatterGroups.entries()).map(([group, groupRows]) => ({
-          x: groupRows.map((row) => row.water_table_depth),
-          y: groupRows.map((row) => row.pH),
-          customdata: groupRows,
-          text: groupRows.map(
-            (row) => {
-              const dominant = profileBySample.get(String(row.sampleid))?.dominant_genus;
-              return `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}${dominant ? `<br>Dominant: ${dominant}` : ""}`;
-            }
-          ),
-          hovertemplate: "%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<extra></extra>",
-          mode: "markers",
-          type: "scatter" as const,
-          name: group,
-          marker: { color: categoryColor(group), size: 8, opacity: 0.76 },
-        }))}
+        data={environmentalTraces}
         layout={{
           autosize: true,
           height: 500,
@@ -231,6 +290,12 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
         }}
       />
       </Suspense>
+      )}
+
+      {displayMode === "selected_genus" && !profilesLoading && (
+        <p style={{ marginTop: "8px", opacity: 0.72 }}>
+          Ring diameter uses square-root scaling to represent {activeGenus} composition; small muted points are samples where the genus was not recorded.
+        </p>
       )}
 
       {!selected && pinned.length === 0 ? (
@@ -338,15 +403,34 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
         </div>
         <Suspense fallback={<p>Loading response chart…</p>}>
         <Plot
-          data={[{
-            x: responseRows.map((row) => row.environmental),
-            y: responseRows.map((row) => row.abundance),
-            text: responseRows.map((row) => `${row.site}<br>Sample ${row.sampleid}`),
-            hovertemplate: "%{text}<br>x %{x:.2f}<br>abundance %{y:.2f}%<extra></extra>",
-            mode: "markers",
-            type: "scatter",
-            marker: { color: taxonColor(activeGenus), opacity: 0.62, size: 7 },
-          }]}
+          data={[
+            {
+              x: zeroResponseRows.map((row) => row.environmental),
+              y: zeroResponseRows.map((row) => row.abundance),
+              text: zeroResponseRows.map((row) => `${row.site}<br>Sample ${row.sampleid}`),
+              hovertemplate: "%{text}<br>x %{x:.2f}<br>abundance 0.00%<extra>Not recorded</extra>",
+              mode: "markers",
+              type: "scatter",
+              name: `${activeGenus} absent`,
+              marker: { color: "#94a3b8", opacity: 0.22, size: 5 },
+            },
+            {
+              x: positiveResponseRows.map((row) => row.environmental),
+              y: positiveResponseRows.map((row) => row.abundance),
+              text: positiveResponseRows.map((row) => `${row.site}<br>Sample ${row.sampleid}`),
+              hovertemplate: "%{text}<br>x %{x:.2f}<br>abundance %{y:.2f}%<extra></extra>",
+              mode: "markers",
+              type: "scatter",
+              name: activeGenus,
+              marker: {
+                symbol: "circle-open",
+                color: taxonColor(activeGenus),
+                opacity: 0.84,
+                size: positiveResponseRows.map((row) => ringSize(row.abundance)),
+                line: { color: taxonColor(activeGenus), width: 2 },
+              },
+            },
+          ]}
           layout={{
             autosize: true,
             height: 360,

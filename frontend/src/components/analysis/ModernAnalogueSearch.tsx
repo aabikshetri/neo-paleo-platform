@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { findModernAnalogues, type AnalogueResult } from "../../api/taxa";
 import { taxonColor } from "../visualization/taxaColors";
@@ -14,7 +14,13 @@ function formatNumber(value?: number | null, digits = 2) {
   return value == null || !Number.isFinite(Number(value)) ? "—" : Number(value).toFixed(digits);
 }
 
-export default function ModernAnalogueSearch({ rows }: { rows: SampleRow[] }) {
+export default function ModernAnalogueSearch({
+  rows,
+  onSnapshotChange,
+}: {
+  rows: SampleRow[];
+  onSnapshotChange?: (snapshot: Record<string, unknown> | null) => void;
+}) {
   const samples = useMemo(
     () => rows.filter((row) => row.sampleid != null),
     [rows]
@@ -46,6 +52,33 @@ export default function ModernAnalogueSearch({ rows }: { rows: SampleRow[] }) {
   }
 
   const activeResult = result.key === currentKey ? result.data : null;
+
+  useEffect(() => {
+    if (!activeResult || activeResult.error) {
+      onSnapshotChange?.(null);
+      return;
+    }
+    onSnapshotChange?.({
+      settings: {
+        target_sampleid: target,
+        limit: 10,
+        exclude_same_site: excludeSameSite,
+        exclude_same_doi: excludeSameDoi,
+      },
+      result: {
+        method: activeResult.method,
+        candidate_count: activeResult.candidate_count,
+        excluded_candidate_count: activeResult.excluded_candidate_count,
+        matches: activeResult.matches.map((match) => ({
+          sampleid: match.sampleid,
+          datasetid: match.datasetid,
+          doi: match.doi,
+          bray_curtis: match.bray_curtis,
+          analogue_class: match.analogue_class,
+        })),
+      },
+    });
+  }, [activeResult, excludeSameDoi, excludeSameSite, onSnapshotChange, target]);
   const bestMatch = activeResult?.matches[0];
   const targetComposition = activeResult?.target_composition ?? [];
   const comparisonGenera = Array.from(new Set([
