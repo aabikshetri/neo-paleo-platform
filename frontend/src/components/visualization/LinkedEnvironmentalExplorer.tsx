@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import Plot from "react-plotly.js";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   Cell,
   Legend,
@@ -36,7 +35,8 @@ type SampleProfile = {
   composition: CompositionRow[];
 };
 
-const MAX_PROFILES = 1000;
+const MAX_PROFILES = 300;
+const Plot = lazy(() => import("./PlotlyChart"));
 
 function categoryColor(name: string) {
   if (name === "Other genera") return "#94a3b8";
@@ -91,6 +91,7 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
   }, [ids, requestKey]);
 
   const profiles = result.key === requestKey ? result.data : [];
+  const profilesLoading = result.key !== requestKey && ids.length > 0;
   const profileBySample = new Map(
     profiles.map((profile) => [String(profile.sampleid), profile])
   );
@@ -185,6 +186,16 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
         </p>
       )}
 
+      {profilesLoading ? (
+        <div style={{ minHeight: "500px", display: "grid", placeItems: "center" }}>
+          Loading environmental profiles…
+        </div>
+      ) : (
+      <Suspense fallback={(
+        <div style={{ minHeight: "500px", display: "grid", placeItems: "center" }}>
+          Loading interactive chart…
+        </div>
+      )}>
       <Plot
         data={Array.from(scatterGroups.entries()).map(([group, groupRows]) => ({
           x: groupRows.map((row) => row.water_table_depth),
@@ -219,6 +230,8 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
           if (row) setSelected(row);
         }}
       />
+      </Suspense>
+      )}
 
       {!selected && pinned.length === 0 ? (
         <p style={{ marginTop: "12px", opacity: 0.72 }}>
@@ -323,6 +336,7 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
             </select>
           </div>
         </div>
+        <Suspense fallback={<p>Loading response chart…</p>}>
         <Plot
           data={[{
             x: responseRows.map((row) => row.environmental),
@@ -345,6 +359,7 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
           config={{ responsive: true, displaylogo: false }}
           style={{ width: "100%" }}
         />
+        </Suspense>
       </section>
     </div>
   );

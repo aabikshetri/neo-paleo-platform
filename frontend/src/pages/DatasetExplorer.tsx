@@ -7,6 +7,7 @@ import DownloadCSV from "../components/search/DownloadCSV";
 import SiteMap from "../components/visualization/SiteMap";
 import TaxaCompositionChart from "../components/visualization/TaxaCompositionChart";
 import LinkedEnvironmentalExplorer from "../components/visualization/LinkedEnvironmentalExplorer";
+import ViewportMount from "../components/visualization/ViewportMount";
 
 import { searchDatasets } from "../api/search";
 import { getTaxaBySamples } from "../api/taxa";
@@ -252,7 +253,9 @@ export default function DatasetExplorer() {
             onBoundsSelect={selectRegion}
           />
         ) : (
-          <LinkedEnvironmentalExplorer rows={selectedRows} />
+          <ViewportMount>
+            <LinkedEnvironmentalExplorer rows={selectedRows} />
+          </ViewportMount>
         )}
       </div>
 

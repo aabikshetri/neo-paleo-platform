@@ -279,6 +279,27 @@ def compute_taxa_lumping(df, level="genus"):
     return result.to_dict(orient="records")
 
 
+def build_genus_profiles(source):
+    """Normalize once per sample, then reuse the genus profiles in requests."""
+    temp = source[["sampleid", "taxon_name", "abundance"]].copy()
+    temp["abundance"] = pd.to_numeric(temp["abundance"], errors="coerce")
+    temp = temp.dropna(subset=["sampleid", "taxon_name", "abundance"])
+    temp = temp[temp["abundance"] > 0]
+    temp["lumped_taxon"] = temp["taxon_name"].apply(
+        lambda value: lump_taxon_name(value, "genus")
+    )
+    totals = temp.groupby("sampleid")["abundance"].transform("sum")
+    temp["percentage"] = temp["abundance"] / totals * 100
+    return (
+        temp.groupby(["sampleid", "lumped_taxon"], as_index=False)["percentage"]
+        .sum()
+        .sort_values(["sampleid", "percentage"], ascending=[True, False])
+    )
+
+
+genus_profiles_df = build_genus_profiles(taxa_df)
+
+
 def limit_taxa_groups(records, limit):
     if limit is None or limit <= 0 or len(records) <= limit:
         return records
@@ -395,6 +416,43 @@ def taxa_by_samples(sampleids: str, level: str = "genus", limit: int = 25):
     return limit_taxa_groups(result, max(1, min(limit, 100)))
 
 
+class TaxaAggregateRequest(BaseModel):
+    sampleids: list[int]
+    level: str = "genus"
+    limit: int = 25
+
+
+@app.post("/taxa/aggregate")
+def taxa_aggregate(request: TaxaAggregateRequest):
+    ids = list(dict.fromkeys(request.sampleids))[:5000]
+    if not ids:
+        return []
+
+    if request.level != "genus":
+        selected = taxa_df[taxa_df["sampleid"].isin(ids)]
+        return limit_taxa_groups(
+            compute_taxa_lumping(selected, request.level),
+            max(1, min(request.limit, 100)),
+        )
+
+    selected = genus_profiles_df[genus_profiles_df["sampleid"].isin(ids)]
+    sample_count = selected["sampleid"].nunique()
+    if sample_count == 0:
+        return []
+
+    result = (
+        selected.groupby("lumped_taxon", as_index=False)["percentage"]
+        .sum()
+        .assign(percentage=lambda frame: frame["percentage"] / sample_count)
+        .sort_values("percentage", ascending=False)
+    )
+    result["abundance"] = result["percentage"]
+    return limit_taxa_groups(
+        result.to_dict(orient="records"),
+        max(1, min(request.limit, 100)),
+    )
+
+
 @app.get("/taxa/composition-by-samples")
 def taxa_composition_by_samples(
     sampleids: str,
@@ -440,7 +498,11 @@ class SampleProfilesRequest(BaseModel):
 def taxa_sample_profiles(request: SampleProfilesRequest):
     ids = list(dict.fromkeys(request.sampleids))[:1000]
     group_limit = max(2, min(request.limit, 100))
-    selected = taxa_df[taxa_df["sampleid"].isin(ids)].copy()
+    selected = (
+        genus_profiles_df[genus_profiles_df["sampleid"].isin(ids)].copy()
+        if request.level == "genus"
+        else taxa_df[taxa_df["sampleid"].isin(ids)].copy()
+    )
 
     if selected.empty:
         return []
@@ -451,10 +513,16 @@ def taxa_sample_profiles(request: SampleProfilesRequest):
         sample = grouped.get(sampleid)
         if sample is None:
             continue
-        composition = limit_taxa_groups(
-            compute_taxa_lumping(sample, request.level),
-            group_limit,
-        )
+        if request.level == "genus":
+            composition = sample[["lumped_taxon", "percentage"]].to_dict(orient="records")
+            for row in composition:
+                row["abundance"] = row["percentage"]
+            composition = limit_taxa_groups(composition, group_limit)
+        else:
+            composition = limit_taxa_groups(
+                compute_taxa_lumping(sample, request.level),
+                group_limit,
+            )
         dominant = next(
             (row["lumped_taxon"] for row in composition if row["lumped_taxon"] != "Other"),
             "Unknown",

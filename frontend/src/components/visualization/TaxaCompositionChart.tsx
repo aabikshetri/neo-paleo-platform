@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import Plot from "react-plotly.js";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { getTaxaSampleProfiles } from "../../api/taxa";
 import { taxonColor } from "./taxaColors";
 
@@ -26,7 +25,8 @@ type SampleProfile = {
 };
 
 const MAX_REFERENCE_SAMPLES = 350;
-const MAX_SELECTED_SAMPLES = 1000;
+const MAX_SELECTED_SAMPLES = 300;
+const Plot = lazy(() => import("./PlotlyChart"));
 
 export default function TaxaCompositionChart({
   data,
@@ -132,6 +132,8 @@ export default function TaxaCompositionChart({
   const profiles = profileResult.key === profileKey
     ? profileResult
     : { reference: [], selected: [] };
+  const profilesLoading = profileResult.key !== profileKey &&
+    (referenceIds.length > 0 || selectedIds.length > 0);
   const referenceProfileMap = new Map(
     profiles.reference.map((profile) => [String(profile.sampleid), profile])
   );
@@ -252,6 +254,16 @@ export default function TaxaCompositionChart({
           Reset view
         </button>
       </div>
+      {profilesLoading ? (
+        <div style={{ minHeight: "560px", display: "grid", placeItems: "center" }}>
+          Loading 3D sample profiles…
+        </div>
+      ) : (
+      <Suspense fallback={(
+        <div style={{ minHeight: "560px", display: "grid", placeItems: "center" }}>
+          Loading interactive chart…
+        </div>
+      )}>
       <Plot
         data={[
           ...(showReference ? [{
@@ -294,6 +306,8 @@ export default function TaxaCompositionChart({
         style={{ width: "100%" }}
         revision={plotRevision}
       />
+      </Suspense>
+      )}
 
       <p style={{ opacity: 0.72, marginBottom: "14px" }}>
         Each ring is one sample. Every selected genus keeps its own color and
