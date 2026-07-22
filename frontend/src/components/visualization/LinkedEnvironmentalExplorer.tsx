@@ -31,15 +31,45 @@ type CompositionRow = {
 
 type SampleProfile = {
   sampleid: number;
-  dominant_genus: string;
+  dominant_taxon: string;
   composition: CompositionRow[];
 };
 
-const MAX_PROFILES = 300;
 const Plot = lazy(() => import("./PlotlyChart"));
 
+function selectRowsForPlot(
+  rows: SampleRow[],
+  limit: number,
+  method: "site_stratified" | "even_interval"
+) {
+  if (rows.length <= limit) return rows;
+  if (method === "even_interval") {
+    const step = rows.length / limit;
+    return Array.from({ length: limit }, (_, index) => rows[Math.floor(index * step)]);
+  }
+
+  const groups = new Map<string, SampleRow[]>();
+  rows.forEach((row) => {
+    const key = String(row.siteid ?? row.sitename ?? "Unknown site");
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  });
+  const siteRows = Array.from(groups.values());
+  const selected: SampleRow[] = [];
+  for (let depth = 0; selected.length < limit; depth += 1) {
+    let added = false;
+    siteRows.forEach((group) => {
+      if (selected.length < limit && group[depth]) {
+        selected.push(group[depth]);
+        added = true;
+      }
+    });
+    if (!added) break;
+  }
+  return selected;
+}
+
 function categoryColor(name: string) {
-  if (name === "Other genera") return "#94a3b8";
+  if (name === "Other taxa") return "#94a3b8";
   return taxonColor(name);
 }
 
@@ -59,12 +89,21 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
   const [displayMode, setDisplayMode] = useState("selected_genus");
   const [responseVariable, setResponseVariable] = useState("water_table_depth");
   const [responseGenus, setResponseGenus] = useState("");
+  const [maxProfiles, setMaxProfiles] = useState(5000);
+  const [samplingMethod, setSamplingMethod] = useState<"site_stratified" | "even_interval">("site_stratified");
+  const [minimumAbundance, setMinimumAbundance] = useState(0);
+  const [showAbsences, setShowAbsences] = useState(true);
+  const [ringScale, setRingScale] = useState(1);
 
-  const validRows = useMemo(
+  const eligibleRows = useMemo(
     () => rows.filter(
       (row) => row.sampleid != null && row.pH != null && row.water_table_depth != null
-    ).slice(0, MAX_PROFILES),
+    ),
     [rows]
+  );
+  const validRows = useMemo(
+    () => selectRowsForPlot(eligibleRows, maxProfiles, samplingMethod),
+    [eligibleRows, maxProfiles, samplingMethod]
   );
   const ids = useMemo(
     () => validRows.flatMap((row) => row.sampleid == null ? [] : [row.sampleid]),
@@ -106,8 +145,8 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
   const dominantCounts = new Map<string, number>();
   profiles.forEach((profile) => {
     dominantCounts.set(
-      profile.dominant_genus,
-      (dominantCounts.get(profile.dominant_genus) ?? 0) + 1
+      profile.dominant_taxon,
+      (dominantCounts.get(profile.dominant_taxon) ?? 0) + 1
     );
   });
   const topDominantGenera = new Set(
@@ -120,10 +159,10 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
   const scatterGroups = new Map<string, SampleRow[]>();
   validRows.forEach((row) => {
     const profile = profileBySample.get(String(row.sampleid));
-    const dominant = profile?.dominant_genus || "No taxa data";
+    const dominant = profile?.dominant_taxon || "No taxa data";
     const group = displayMode === "site"
       ? row.sitename || "Unknown site"
-      : topDominantGenera.has(dominant) ? dominant : "Other genera";
+      : topDominantGenera.has(dominant) ? dominant : "Other taxa";
     scatterGroups.set(group, [...(scatterGroups.get(group) ?? []), row]);
   });
 
@@ -159,23 +198,29 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
     .get(String(row.sampleid))
     ?.composition.find((item) => item.lumped_taxon === activeGenus)
     ?.percentage ?? 0;
-  const ringRows = validRows.filter((row) => genusAbundance(row) > 0);
-  const absentRows = validRows.filter((row) => genusAbundance(row) <= 0);
+  const ringRows = validRows.filter((row) => {
+    const abundance = genusAbundance(row);
+    return abundance > 0 && abundance >= minimumAbundance;
+  });
+  const backgroundRows = validRows.filter((row) => {
+    const abundance = genusAbundance(row);
+    return abundance <= 0 || abundance < minimumAbundance;
+  });
   const ringSize = (percentage: number) =>
-    Math.max(7, Math.min(30, 5 + Math.sqrt(Math.max(percentage, 0)) * 3));
+    Math.max(7, Math.min(42, Math.sqrt(Math.max(percentage, 0)) * 4 * ringScale));
   const environmentalTraces = displayMode === "selected_genus"
     ? [
-        {
-          x: absentRows.map((row) => row.water_table_depth),
-          y: absentRows.map((row) => row.pH),
-          customdata: absentRows,
-          text: absentRows.map((row) => `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}`),
-          hovertemplate: `%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<br>${activeGenus}: 0.00%<extra>Not recorded</extra>`,
+        ...(showAbsences ? [{
+          x: backgroundRows.map((row) => row.water_table_depth),
+          y: backgroundRows.map((row) => row.pH),
+          customdata: backgroundRows,
+          text: backgroundRows.map((row) => `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}<br>${activeGenus}: ${genusAbundance(row).toFixed(2)}%`),
+          hovertemplate: "%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<extra>Absent or below threshold</extra>",
           mode: "markers" as const,
           type: "scatter" as const,
-          name: `${activeGenus} absent`,
-          marker: { color: "#94a3b8", size: 5, opacity: 0.22 },
-        },
+          name: minimumAbundance > 0 ? `Below ${minimumAbundance}%` : `${activeGenus} absent`,
+          marker: { symbol: "circle", color: "#94a3b8", size: 9, opacity: 0.42 },
+        }] : []),
         {
           x: ringRows.map((row) => row.water_table_depth),
           y: ringRows.map((row) => row.pH),
@@ -199,7 +244,7 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
         y: groupRows.map((row) => row.pH),
         customdata: groupRows,
         text: groupRows.map((row) => {
-          const dominant = profileBySample.get(String(row.sampleid))?.dominant_genus;
+          const dominant = profileBySample.get(String(row.sampleid))?.dominant_taxon;
           return `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}${dominant ? `<br>Dominant: ${dominant}` : ""}`;
         }),
         hovertemplate: "%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<extra></extra>",
@@ -217,6 +262,17 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
 
   const positiveResponseRows = responseRows.filter((row) => row.abundance > 0);
   const zeroResponseRows = responseRows.filter((row) => row.abundance <= 0);
+  const sortedNonZeroAbundances = positiveResponseRows
+    .map((row) => row.abundance)
+    .sort((a, b) => a - b);
+  const medianNonZero = sortedNonZeroAbundances.length
+    ? sortedNonZeroAbundances.length % 2
+      ? sortedNonZeroAbundances[Math.floor(sortedNonZeroAbundances.length / 2)]
+      : (sortedNonZeroAbundances[sortedNonZeroAbundances.length / 2 - 1] + sortedNonZeroAbundances[sortedNonZeroAbundances.length / 2]) / 2
+    : 0;
+  const responsePrevalence = responseRows.length
+    ? positiveResponseRows.length / responseRows.length * 100
+    : 0;
 
   return (
     <div>
@@ -238,14 +294,14 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
         <label>
           Display samples as{" "}
           <select value={displayMode} onChange={(event) => setDisplayMode(event.target.value)}>
-            <option value="selected_genus">Genus-abundance rings</option>
-            <option value="dominant_genus">Dominant genus</option>
+            <option value="selected_genus">Taxon-abundance rings</option>
+            <option value="dominant_genus">Dominant taxon</option>
             <option value="site">Site</option>
           </select>
         </label>
         {displayMode === "selected_genus" && (
           <label>
-            Genus{" "}
+            Taxon{" "}
             <select value={activeGenus} onChange={(event) => setResponseGenus(event.target.value)}>
               {genera.map((genus) => <option key={genus}>{genus}</option>)}
             </select>
@@ -254,11 +310,51 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
         </div>
       </div>
 
-      {rows.length > MAX_PROFILES && (
+      {eligibleRows.length > maxProfiles && (
         <p style={{ opacity: 0.72, textAlign: "left" }}>
-          Showing the first {MAX_PROFILES.toLocaleString()} complete samples for interactive analysis.
+          Showing {validRows.length.toLocaleString()} of {eligibleRows.length.toLocaleString()} complete samples using {samplingMethod === "site_stratified" ? "site-stratified round-robin" : "even-interval"} selection.
         </p>
       )}
+
+      <details style={{ margin: "12px 0", textAlign: "left" }}>
+        <summary style={{ cursor: "pointer" }}>Plot controls</summary>
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "end", marginTop: "10px" }}>
+          <label>
+            <span style={{ display: "block" }}>Maximum samples</span>
+            <select value={maxProfiles} onChange={(event) => setMaxProfiles(Number(event.target.value))}>
+              {[300, 500, 1000].map((value) => <option key={value}>{value}</option>)}
+              <option value={5000}>All filtered samples</option>
+            </select>
+          </label>
+          <label>
+            <span style={{ display: "block" }}>Sample selection</span>
+            <select value={samplingMethod} onChange={(event) => setSamplingMethod(event.target.value as typeof samplingMethod)}>
+              <option value="site_stratified">Balance across sites</option>
+              <option value="even_interval">Even interval</option>
+            </select>
+          </label>
+          {displayMode === "selected_genus" && (
+            <>
+              <label>
+                <span style={{ display: "block" }}>Minimum composition (%)</span>
+                <input type="number" min="0" max="100" step="0.5" value={minimumAbundance} onChange={(event) => setMinimumAbundance(Math.max(0, Number(event.target.value)))} />
+              </label>
+              <label>
+                <span style={{ display: "block" }}>Ring scale</span>
+                <select value={ringScale} onChange={(event) => setRingScale(Number(event.target.value))}>
+                  <option value={0.75}>Small</option>
+                  <option value={1}>Standard</option>
+                  <option value={1.35}>Large</option>
+                </select>
+              </label>
+              <label style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
+                <input type="checkbox" checked={showAbsences} onChange={(event) => setShowAbsences(event.target.checked)} />
+                Show absent/below-threshold samples
+              </label>
+            </>
+          )}
+        </div>
+      </details>
 
       {profilesLoading ? (
         <div style={{ minHeight: "500px", display: "grid", placeItems: "center" }}>
@@ -293,9 +389,19 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
       )}
 
       {displayMode === "selected_genus" && !profilesLoading && (
-        <p style={{ marginTop: "8px", opacity: 0.72 }}>
-          Ring diameter uses square-root scaling to represent {activeGenus} composition; small muted points are samples where the genus was not recorded.
-        </p>
+        <div style={{ marginTop: "8px", opacity: 0.72 }}>
+          <p>
+            Ring diameter uses square-root abundance scaling, so area tracks {activeGenus} composition except at the stated visibility limits; coordinates are unaltered. {showAbsences ? "Small muted points are absent or below the selected threshold." : "Absent and below-threshold samples are hidden."}
+          </p>
+          <div style={{ display: "flex", gap: "16px", alignItems: "end", marginTop: "8px" }} aria-label="Ring-size legend">
+            {[1, 10, 50].map((percentage) => (
+              <span key={percentage} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ display: "inline-block", width: `${ringSize(percentage)}px`, height: `${ringSize(percentage)}px`, border: `2px solid ${taxonColor(activeGenus)}`, borderRadius: "50%", boxSizing: "border-box" }} />
+                {percentage}%
+              </span>
+            ))}
+          </div>
+        </div>
       )}
 
       {!selected && pinned.length === 0 ? (
@@ -326,7 +432,14 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
                 {selected.doi && (
                   <><br /><a href={`https://doi.org/${selected.doi.split(";")[0]}`} target="_blank" rel="noreferrer">Dataset DOI</a></>
                 )}
-                {selected.investigators && <><br />Investigators: {selected.investigators}</>}
+                {selected.investigators && (
+                  <details style={{ marginTop: "6px" }}>
+                    <summary style={{ cursor: "pointer" }}>
+                      Investigators ({selected.investigators.split(";").filter((name) => name.trim()).length})
+                    </summary>
+                    <span>{selected.investigators}</span>
+                  </details>
+                )}
               </div>
               <button onClick={() => togglePin(selected)} style={{ marginTop: "10px" }}>
                 {pinned.some((item) => item.sampleid === selected.sampleid)
@@ -388,8 +501,11 @@ export default function LinkedEnvironmentalExplorer({ rows }: { rows: SampleRow[
       <section style={{ marginTop: "22px", borderTop: "1px solid var(--border)", paddingTop: "20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
           <div style={{ textAlign: "left" }}>
-            <h3 style={{ marginBottom: "4px" }}>Genus response</h3>
+            <h3 style={{ marginBottom: "4px" }}>Taxon response</h3>
             <p style={{ opacity: 0.72 }}>Explore abundance along the measured environmental gradient.</p>
+            <p style={{ opacity: 0.72, marginTop: "4px" }}>
+              {positiveResponseRows.length.toLocaleString()} of {responseRows.length.toLocaleString()} plotted samples are non-zero ({responsePrevalence.toFixed(1)}% prevalence); median non-zero composition {medianNonZero.toFixed(2)}%.
+            </p>
           </div>
           <div style={{ display: "flex", gap: "8px" }}>
             <select value={activeGenus} onChange={(event) => setResponseGenus(event.target.value)}>

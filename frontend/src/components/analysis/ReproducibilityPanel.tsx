@@ -24,29 +24,40 @@ export default function ReproducibilityPanel({
     const value = row.sampleid;
     return typeof value === "number" ? [value] : [];
   }))).sort((a, b) => a - b);
+  const datasetids = Array.from(new Set(rows.flatMap((row) => {
+    const value = row.datasetid;
+    return typeof value === "number" ? [value] : [];
+  }))).sort((a, b) => a - b);
+  const normalizeDoi = (value: string) => value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//, "")
+    .replace(/^doi:\s*/, "");
   const dois = Array.from(new Set(rows.flatMap((row) => {
     const value = row.doi ?? row.dataset_doi ?? row.publication_doi;
     return typeof value === "string"
-      ? value.split(";").map((doi) => doi.trim()).filter(Boolean)
+      ? value.split(";").map(normalizeDoi).filter(Boolean)
       : [];
   }))).sort();
 
   const manifest = {
     schema_version: "1.0",
     exported_at_utc: new Date().toISOString(),
-    platform: "Paleoecology Analytics Platform",
+    platform: "Neotoma Testate Amoeba Database Explorer: Surface-samples and Paleoecology",
     data_source: "Neotoma Paleoecology Database",
     selection: {
       filters,
       sample_count: sampleids.length,
       sampleids,
+      dataset_count: datasetids.length,
+      datasetids,
       dataset_dois: dois,
     },
     preprocessing: {
-      taxonomic_level: "genus",
+      taxonomic_level: "finest recorded Neotoma taxon name",
       composition: "normalized to 100% within each sample",
       dissimilarity: "Bray-Curtis",
-      nmds_post_filter_normalization: "retained genera renormalized to 100%",
+      nmds_post_filter_normalization: "retained taxa renormalized to 100%",
     },
     modern_analogue: analogueSnapshot,
     nmds: nmdsSnapshot,
@@ -116,7 +127,7 @@ print("Wrote reproduced-analysis-results.json")
         Save the current calibration selection, method settings, diagnostics, and result summaries.
       </p>
       <p style={{ marginTop: "12px" }}>
-        {sampleids.length.toLocaleString()} sample IDs · {dois.length.toLocaleString()} DOI values · {analogueSnapshot ? "analogue recorded" : "run analogue search to record it"} · {nmdsSnapshot ? "NMDS recorded" : "run NMDS to record it"}
+        {sampleids.length.toLocaleString()} sample IDs · {datasetids.length.toLocaleString()} datasets · {dois.length.toLocaleString()} unique normalized DOI tokens · {analogueSnapshot ? "analogue recorded" : "run analogue search to record it"} · {nmdsSnapshot ? "NMDS recorded" : "run NMDS to record it"}
       </p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "16px" }}>
         <button type="button" onClick={downloadManifest}>Download analysis manifest</button>

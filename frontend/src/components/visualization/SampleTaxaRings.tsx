@@ -114,7 +114,7 @@ export default function SampleTaxaRings({ rows }: { rows: SampleRow[] }) {
         <div style={{ textAlign: "left" }}>
           <h3 style={{ marginBottom: "4px" }}>Composition by sample</h3>
           <p style={{ opacity: 0.75 }}>
-            Genus composition for each sample shown in the pH–water table dataset.
+            Finest-level taxon composition for each sample shown in the pH–water table dataset.
           </p>
         </div>
 

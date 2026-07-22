@@ -75,11 +75,18 @@ export default function ModernAnalogueSearch({
           doi: match.doi,
           bray_curtis: match.bray_curtis,
           analogue_class: match.analogue_class,
+          delta_pH: match.delta_pH,
+          delta_water_table_depth: match.delta_water_table_depth,
         })),
+        target_environment: activeResult.target_environment,
       },
     });
   }, [activeResult, excludeSameDoi, excludeSameSite, onSnapshotChange, target]);
   const bestMatch = activeResult?.matches[0];
+  const bestHasLargeEnvironmentalDifference = Boolean(bestMatch && (
+    (bestMatch.delta_pH != null && Math.abs(bestMatch.delta_pH) > 0.5) ||
+    (bestMatch.delta_water_table_depth != null && Math.abs(bestMatch.delta_water_table_depth) > 10)
+  ));
   const targetComposition = activeResult?.target_composition ?? [];
   const comparisonGenera = Array.from(new Set([
     ...targetComposition.map((item) => item.lumped_taxon),
@@ -146,6 +153,11 @@ export default function ModernAnalogueSearch({
                     ? "A possible analogue is present, but no close analogue was found."
                     : "No close or possible modern analogue was found in the filtered calibration set."}
               </p>
+              {bestHasLargeEnvironmentalDifference && (
+                <p style={{ marginTop: "8px", padding: "10px", border: "1px solid var(--accent-border)", borderRadius: "8px" }}>
+                  Assemblage similarity does not imply environmental agreement. This analogue differs from the target by {bestMatch.delta_pH == null ? "an unknown pH amount" : `ΔpH ${bestMatch.delta_pH >= 0 ? "+" : ""}${bestMatch.delta_pH.toFixed(2)}`} and {bestMatch.delta_water_table_depth == null ? "an unknown WTD amount" : `ΔWTD ${bestMatch.delta_water_table_depth >= 0 ? "+" : ""}${bestMatch.delta_water_table_depth.toFixed(1)} ${bestMatch.water_table_depth_units || ""}`}.
+                </p>
+              )}
               <div style={{ display: "grid", gap: "8px", marginTop: "14px" }}>
                 {comparisonGenera.map((taxon) => {
                   const targetValue = compositionValue(targetComposition, taxon);
@@ -165,10 +177,10 @@ export default function ModernAnalogueSearch({
             </div>
           )}
           <div style={{ overflowX: "auto", marginTop: "12px" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+            <table className="analysis-table">
               <thead>
                 <tr>
-                  <th>Rank</th><th>Site and sample</th><th>Dissimilarity</th><th>Class</th><th>Environment</th><th>Shared genera</th>
+                  <th>Rank</th><th>Site and sample</th><th>Dissimilarity</th><th>Class</th><th>Environment</th><th>Difference from target</th><th>Shared taxa</th>
                 </tr>
               </thead>
               <tbody>
@@ -179,7 +191,8 @@ export default function ModernAnalogueSearch({
                     <td>{match.bray_curtis.toFixed(3)}</td>
                     <td>{match.analogue_class}</td>
                     <td>pH {formatNumber(match.pH)}<br />WTD {formatNumber(match.water_table_depth, 1)} {match.water_table_depth_units || ""}</td>
-                    <td>{match.shared_genera.join(", ") || "—"}</td>
+                    <td>ΔpH {match.delta_pH == null ? "—" : `${match.delta_pH >= 0 ? "+" : ""}${match.delta_pH.toFixed(2)}`}<br />ΔWTD {match.delta_water_table_depth == null ? "—" : `${match.delta_water_table_depth >= 0 ? "+" : ""}${match.delta_water_table_depth.toFixed(1)}`}</td>
+                    <td>{match.shared_taxa.join(", ") || "—"}</td>
                   </tr>
                 ))}
               </tbody>

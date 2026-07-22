@@ -52,7 +52,7 @@ export default function CalibrationQualityPanel({ rows }: { rows: SampleRow[] })
   ] as const;
   const warnings = [
     quality.missing_taxa > 0 && `${quality.missing_taxa.toLocaleString()} samples have no usable taxa composition.`,
-    quality.low_richness_samples > 0 && `${quality.low_richness_samples.toLocaleString()} samples contain fewer than five recorded genera.`,
+    quality.low_richness_samples > 0 && `${quality.low_richness_samples.toLocaleString()} samples contain fewer than five recorded taxa.`,
     quality.water_table_units.length > 1 && `Multiple water-table units are present: ${quality.water_table_units.join(", ")}.`,
   ].filter(Boolean) as string[];
 
@@ -82,7 +82,7 @@ export default function CalibrationQualityPanel({ rows }: { rows: SampleRow[] })
       </div>
 
       <p style={{ marginTop: "18px", textAlign: "left" }}>
-        Environmental coverage: pH {quality.ph_range.min?.toFixed(2) ?? "—"}–{quality.ph_range.max?.toFixed(2) ?? "—"}; water-table depth {quality.water_table_range.min?.toFixed(1) ?? "—"}–{quality.water_table_range.max?.toFixed(1) ?? "—"}. Median richness is {quality.median_genus_richness?.toFixed(1) ?? "—"} genera per sample.
+        Environmental coverage: pH {quality.ph_range.min?.toFixed(2) ?? "—"}–{quality.ph_range.max?.toFixed(2) ?? "—"}; water-table depth {quality.water_table_range.min?.toFixed(1) ?? "—"}–{quality.water_table_range.max?.toFixed(1) ?? "—"}. Median richness is {quality.median_taxon_richness?.toFixed(1) ?? "—"} recorded taxa per sample.
       </p>
 
       {warnings.length > 0 && (

@@ -1,11 +1,13 @@
 import json
 import inspect
+import io
 from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
 
 import numpy as np
 
@@ -99,6 +101,26 @@ taxa_df["abundance"] = pd.to_numeric(
     taxa_df["abundance"],
     errors="coerce"
 )
+
+
+def normalize_doi(value):
+    if value is None or pd.isna(value):
+        return None
+    doi = str(value).strip().lower()
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
+        if doi.startswith(prefix):
+            doi = doi[len(prefix):].strip()
+    return doi or None
+
+
+def doi_tokens(value):
+    if value is None or pd.isna(value):
+        return set()
+    return {
+        normalized
+        for token in str(value).split(";")
+        if (normalized := normalize_doi(token))
+    }
 
 for col in ["pH", "water_table_depth", "altitude"]:
     if col in df.columns:
@@ -221,7 +243,7 @@ def lump_taxon_name(name: str, level: str = "genus"):
     return name
 
 
-def compute_taxa_lumping(df, level="genus"):
+def compute_taxa_lumping(df, level="taxon"):
     taxon_col = "taxon_name"
     abundance_col = "abundance"
     sample_col = "sampleid"
@@ -268,7 +290,7 @@ def compute_taxa_lumping(df, level="genus"):
     sample_totals = temp.groupby(sample_col)[abundance_col].transform("sum")
     temp["sample_percent"] = temp[abundance_col] / sample_totals * 100
 
-    # Several species can lump into the same genus within one sample.
+    # Duplicate observations of the same recorded taxon are combined per sample.
     per_sample = (
         temp.groupby([sample_col, "lumped_taxon"], as_index=False)["sample_percent"]
         .sum()
@@ -291,15 +313,13 @@ def compute_taxa_lumping(df, level="genus"):
     return result.to_dict(orient="records")
 
 
-def build_genus_profiles(source):
-    """Normalize once per sample, then reuse the genus profiles in requests."""
+def build_taxon_profiles(source):
+    """Normalize once per sample at Neotoma's finest recorded taxon level."""
     temp = source[["sampleid", "taxon_name", "abundance"]].copy()
     temp["abundance"] = pd.to_numeric(temp["abundance"], errors="coerce")
     temp = temp.dropna(subset=["sampleid", "taxon_name", "abundance"])
     temp = temp[temp["abundance"] > 0]
-    temp["lumped_taxon"] = temp["taxon_name"].apply(
-        lambda value: lump_taxon_name(value, "genus")
-    )
+    temp["lumped_taxon"] = temp["taxon_name"].apply(lambda value: lump_taxon_name(value, "taxon"))
     totals = temp.groupby("sampleid")["abundance"].transform("sum")
     temp["percentage"] = temp["abundance"] / totals * 100
     return (
@@ -309,14 +329,14 @@ def build_genus_profiles(source):
     )
 
 
-genus_profiles_df = build_genus_profiles(taxa_df)
+taxon_profiles_df = build_taxon_profiles(taxa_df)
 
 
 def limit_taxa_groups(records, limit):
     if limit is None or limit <= 0 or len(records) <= limit:
         return records
 
-    # Reserve one displayed slice for all genera outside the requested limit.
+    # Reserve one displayed slice for all taxa outside the requested limit.
     kept = records[: max(limit - 1, 0)]
     remainder = records[max(limit - 1, 0):]
     other_percentage = sum(row["percentage"] for row in remainder)
@@ -377,7 +397,7 @@ def environmental_pca():
 
 
 @app.get("/taxa/lumped")
-def taxa_lumped(level: str = "genus"):
+def taxa_lumped(level: str = "taxon"):
     return compute_taxa_lumping(taxa_df, level)
 
 
@@ -400,17 +420,30 @@ def taxa_top(limit: int = 25):
 
 @app.get("/publication-options")
 def publication_options():
-    options = df[["sitename", "doi"]].dropna(subset=["doi"]).copy()
-    options["doi"] = options["doi"].astype(str).str.split(";")
-    options = options.explode("doi")
-    options["doi"] = options["doi"].str.strip().str.lower()
-    options = options[options["doi"].ne("")].drop_duplicates(subset=["doi"])
-    options = options.sort_values(["sitename", "doi"], na_position="last")
+    columns = ["datasetid", "sitename", "doi", "investigators"]
+    options = df[[column for column in columns if column in df]].dropna(subset=["doi"]).copy()
+    options = options.drop_duplicates(subset=["datasetid"])
+    options["doi"] = options["doi"].map(lambda value: "; ".join(sorted(doi_tokens(value))))
+    options = options[options["doi"].ne("")]
+    def dataset_citation(row):
+        investigators = row.get("investigators")
+        investigator_text = str(investigators) if pd.notna(investigators) else ""
+        names = [name.strip() for name in investigator_text.split(";") if name.strip()]
+        authors = "; ".join(names[:3]) + ("; et al." if len(names) > 3 else "")
+        return (
+            f"{authors or 'Unknown author'}. Neotoma Testate Amoebae dataset "
+            f"{int(row['datasetid'])}: {row.get('sitename') or 'Unknown site'}. "
+            f"https://doi.org/{row['doi'].split(';')[0].strip()}"
+        )
+
+    options["citation"] = options.apply(dataset_citation, axis=1)
+    options["filter_value"] = options["doi"].str.split(";").str[0].str.strip()
+    options = options.sort_values(["citation", "datasetid"], na_position="last")
     options = options.astype(object).where(pd.notnull(options), None)
     return options.to_dict(orient="records")
 
 @app.get("/taxa/by-samples")
-def taxa_by_samples(sampleids: str, level: str = "genus", limit: int = 25):
+def taxa_by_samples(sampleids: str, level: str = "taxon", limit: int = 25):
     ids = [
         int(x)
         for x in sampleids.split(",")
@@ -430,7 +463,7 @@ def taxa_by_samples(sampleids: str, level: str = "genus", limit: int = 25):
 
 class TaxaAggregateRequest(BaseModel):
     sampleids: list[int]
-    level: str = "genus"
+    level: str = "taxon"
     limit: int = 25
 
 
@@ -440,14 +473,14 @@ def taxa_aggregate(request: TaxaAggregateRequest):
     if not ids:
         return []
 
-    if request.level != "genus":
+    if request.level not in {"taxon", "species", "finest"}:
         selected = taxa_df[taxa_df["sampleid"].isin(ids)]
         return limit_taxa_groups(
             compute_taxa_lumping(selected, request.level),
-            max(1, min(request.limit, 100)),
+            max(1, min(request.limit, 500)),
         )
 
-    selected = genus_profiles_df[genus_profiles_df["sampleid"].isin(ids)]
+    selected = taxon_profiles_df[taxon_profiles_df["sampleid"].isin(ids)]
     sample_count = selected["sampleid"].nunique()
     if sample_count == 0:
         return []
@@ -461,14 +494,14 @@ def taxa_aggregate(request: TaxaAggregateRequest):
     result["abundance"] = result["percentage"]
     return limit_taxa_groups(
         result.to_dict(orient="records"),
-        max(1, min(request.limit, 100)),
+        max(1, min(request.limit, 500)),
     )
 
 
 @app.get("/taxa/composition-by-samples")
 def taxa_composition_by_samples(
     sampleids: str,
-    level: str = "genus",
+    level: str = "taxon",
     limit: int = 8,
 ):
     ids = list(dict.fromkeys(
@@ -502,12 +535,83 @@ def taxa_composition_by_samples(
 
 class SampleProfilesRequest(BaseModel):
     sampleids: list[int]
-    level: str = "genus"
+    level: str = "taxon"
     limit: int = 8
+
+
+class TaxonValuesRequest(BaseModel):
+    sampleids: list[int]
+    taxa: list[str]
 
 
 class CalibrationRequest(BaseModel):
     sampleids: list[int]
+
+
+@app.post("/taxa/sample-values")
+def taxa_sample_values(request: TaxonValuesRequest):
+    ids = list(dict.fromkeys(request.sampleids))[:5000]
+    taxa = list(dict.fromkeys(name.strip() for name in request.taxa if name.strip()))[:20]
+    if not ids or not taxa:
+        return []
+    selected = taxon_profiles_df[
+        taxon_profiles_df["sampleid"].isin(ids)
+        & taxon_profiles_df["lumped_taxon"].isin(taxa)
+    ]
+    grouped = {
+        int(sampleid): dict(zip(group["lumped_taxon"], group["percentage"]))
+        for sampleid, group in selected.groupby("sampleid")
+    }
+    return [
+        {
+            "sampleid": sampleid,
+            "composition": [
+                {"lumped_taxon": taxon, "percentage": float(grouped.get(sampleid, {}).get(taxon, 0))}
+                for taxon in taxa
+            ],
+            "combined_percentage": float(sum(grouped.get(sampleid, {}).get(taxon, 0) for taxon in taxa)),
+        }
+        for sampleid in ids
+    ]
+
+
+@app.post("/export/taxa-csv")
+def export_taxa_csv(request: CalibrationRequest):
+    ids = list(dict.fromkeys(request.sampleids))[:5000]
+    metadata_columns = [
+        "sampleid", "datasetid", "siteid", "sitename", "collectionunit", "handle",
+        "pH", "water_table_depth", "water_table_depth_units", "altitude", "doi",
+    ]
+    metadata = df[df["sampleid"].isin(ids)][
+        [column for column in metadata_columns if column in df]
+    ].drop_duplicates("sampleid")
+    observations = taxa_df[taxa_df["sampleid"].isin(ids)].copy()
+    observations["abundance"] = pd.to_numeric(observations["abundance"], errors="coerce")
+    observations = observations.dropna(subset=["sampleid", "taxon_name", "abundance"])
+    # Preserve every raw taxon row in the export, while calculating composition
+    # from positive observations only—the same rule used by every analysis.
+    positive_totals = (
+        observations[observations["abundance"] > 0]
+        .groupby("sampleid")["abundance"]
+        .sum()
+        .rename("positive_sample_total")
+    )
+    observations = observations.join(positive_totals, on="sampleid")
+    observations["composition_percent"] = np.where(
+        (observations["abundance"] > 0) & (observations["positive_sample_total"] > 0),
+        observations["abundance"] / observations["positive_sample_total"] * 100,
+        0.0,
+    )
+    taxon_columns = ["sampleid", "taxonid", "taxon_name", "abundance", "units", "taxongroup", "ecologicalgroup", "composition_percent"]
+    export = metadata.merge(observations[taxon_columns], on="sampleid", how="left")
+    buffer = io.StringIO()
+    export.to_csv(buffer, index=False)
+    buffer.seek(0)
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=neotoma_testate_amoebae_filtered_taxa.csv"},
+    )
 
 
 class AnalogueRequest(BaseModel):
@@ -533,7 +637,7 @@ class NmdsRequest(BaseModel):
 def calibration_quality(request: CalibrationRequest):
     ids = list(dict.fromkeys(request.sampleids))[:5000]
     selected = df[df["sampleid"].isin(ids)].drop_duplicates("sampleid").copy()
-    profiles = genus_profiles_df[genus_profiles_df["sampleid"].isin(ids)]
+    profiles = taxon_profiles_df[taxon_profiles_df["sampleid"].isin(ids)]
     sample_count = len(selected)
     taxa_ids = set(profiles["sampleid"].astype(int).tolist())
     richness = profiles.groupby("sampleid")["lumped_taxon"].nunique()
@@ -552,10 +656,8 @@ def calibration_quality(request: CalibrationRequest):
         units = sorted(
             selected["water_table_depth_units"].dropna().astype(str).str.strip().unique().tolist()
         )
-    doi_values = (
-        selected["doi"].dropna().astype(str).str.split(";").explode().str.strip().str.lower()
-    )
-    doi_values = doi_values[doi_values.ne("")]
+    doi_values = selected["doi"].dropna().astype(str).str.split(";").explode().map(normalize_doi)
+    doi_values = doi_values.dropna()
 
     return {
         "sample_count": sample_count,
@@ -569,7 +671,7 @@ def calibration_quality(request: CalibrationRequest):
         "missing_water_table": missing_count("water_table_depth"),
         "missing_doi": missing_count("doi"),
         "low_richness_samples": int((richness < 5).sum()),
-        "median_genus_richness": float(richness.median()) if not richness.empty else None,
+        "median_taxon_richness": float(richness.median()) if not richness.empty else None,
         "ph_range": numeric_range("pH"),
         "water_table_range": numeric_range("water_table_depth"),
         "water_table_units": units,
@@ -592,11 +694,7 @@ def modern_analogues(request: AnalogueRequest):
     target_metadata = sample_metadata.loc[request.target_sampleid]
     target_siteid = target_metadata.get("siteid")
     target_doi_value = target_metadata.get("doi")
-    target_dois = {
-        value.strip().lower()
-        for value in str(target_doi_value if pd.notna(target_doi_value) else "").split(";")
-        if value.strip()
-    }
+    target_dois = doi_tokens(target_doi_value)
 
     def retain_candidate(sampleid):
         if sampleid not in sample_metadata.index:
@@ -610,18 +708,14 @@ def modern_analogues(request: AnalogueRequest):
             return False
         if request.exclude_same_doi and target_dois:
             candidate_doi_value = candidate.get("doi")
-            candidate_dois = {
-                value.strip().lower()
-                for value in str(candidate_doi_value if pd.notna(candidate_doi_value) else "").split(";")
-                if value.strip()
-            }
+            candidate_dois = doi_tokens(candidate_doi_value)
             if target_dois.intersection(candidate_dois):
                 return False
         return True
 
     candidate_ids = [sampleid for sampleid in candidate_ids if retain_candidate(sampleid)]
     selected_ids = [request.target_sampleid, *candidate_ids]
-    selected = genus_profiles_df[genus_profiles_df["sampleid"].isin(selected_ids)]
+    selected = taxon_profiles_df[taxon_profiles_df["sampleid"].isin(selected_ids)]
     if request.target_sampleid not in set(selected["sampleid"].astype(int)):
         return {"error": "The target sample has no usable taxa composition.", "matches": []}
 
@@ -651,7 +745,7 @@ def modern_analogues(request: AnalogueRequest):
         candidate = matrix.loc[sampleid]
         shared = pd.concat([target.rename("target"), candidate.rename("candidate")], axis=1)
         shared["minimum"] = shared[["target", "candidate"]].min(axis=1)
-        shared_genera = shared[shared["minimum"] > 0].nlargest(5, "minimum").index.tolist()
+        shared_taxa = shared[shared["minimum"] > 0].nlargest(5, "minimum").index.tolist()
         row = metadata.loc[sampleid] if sampleid in metadata.index else None
 
         def metadata_value(column):
@@ -660,6 +754,17 @@ def modern_analogues(request: AnalogueRequest):
             value = row[column]
             return value.item() if hasattr(value, "item") else value
 
+        target_ph = target_metadata.get("pH")
+        target_wtd = target_metadata.get("water_table_depth")
+        target_wtd_units = target_metadata.get("water_table_depth_units")
+        candidate_ph = metadata_value("pH")
+        candidate_wtd = metadata_value("water_table_depth")
+        candidate_wtd_units = metadata_value("water_table_depth_units")
+        comparable_wtd_units = (
+            pd.notna(target_wtd_units)
+            and candidate_wtd_units is not None
+            and str(target_wtd_units).strip().lower() == str(candidate_wtd_units).strip().lower()
+        )
         matches.append({
             "sampleid": int(sampleid),
             "bray_curtis": float(distance),
@@ -667,10 +772,12 @@ def modern_analogues(request: AnalogueRequest):
             "sitename": metadata_value("sitename"),
             "datasetid": metadata_value("datasetid"),
             "doi": metadata_value("doi"),
-            "pH": metadata_value("pH"),
-            "water_table_depth": metadata_value("water_table_depth"),
-            "water_table_depth_units": metadata_value("water_table_depth_units"),
-            "shared_genera": shared_genera,
+            "pH": candidate_ph,
+            "water_table_depth": candidate_wtd,
+            "delta_pH": float(candidate_ph - target_ph) if candidate_ph is not None and pd.notna(target_ph) else None,
+            "delta_water_table_depth": float(candidate_wtd - target_wtd) if candidate_wtd is not None and pd.notna(target_wtd) and comparable_wtd_units else None,
+            "water_table_depth_units": candidate_wtd_units,
+            "shared_taxa": shared_taxa,
             "composition": composition_records(candidate),
         })
 
@@ -680,7 +787,12 @@ def modern_analogues(request: AnalogueRequest):
         "excluded_candidate_count": original_candidate_count - len(candidate_ids),
         "exclude_same_site": request.exclude_same_site,
         "exclude_same_doi": request.exclude_same_doi,
-        "method": "Bray-Curtis dissimilarity on sample-normalized genus percentages",
+        "method": "Bray-Curtis dissimilarity on sample-normalized finest-level Neotoma taxon percentages",
+        "target_environment": {
+            "pH": None if pd.isna(target_metadata.get("pH")) else float(target_metadata.get("pH")),
+            "water_table_depth": None if pd.isna(target_metadata.get("water_table_depth")) else float(target_metadata.get("water_table_depth")),
+            "water_table_depth_units": None if pd.isna(target_metadata.get("water_table_depth_units")) else target_metadata.get("water_table_depth_units"),
+        },
         "target_composition": composition_records(target),
         "matches": matches,
     }
@@ -689,7 +801,7 @@ def modern_analogues(request: AnalogueRequest):
 @app.post("/calibration/nmds")
 def calibration_nmds(request: NmdsRequest):
     ids = list(dict.fromkeys(request.sampleids))[:5000]
-    selected = genus_profiles_df[genus_profiles_df["sampleid"].isin(ids)]
+    selected = taxon_profiles_df[taxon_profiles_df["sampleid"].isin(ids)]
     taxa_sample_ids = set(selected["sampleid"].astype(int))
     available_ids = [sampleid for sampleid in ids if sampleid in taxa_sample_ids]
     if len(available_ids) < 3:
@@ -740,7 +852,7 @@ def calibration_nmds(request: NmdsRequest):
         .pivot_table(index="sampleid", columns="lumped_taxon", values="percentage", fill_value=0)
         .reindex(analysis_ids)
     )
-    original_genus_count = unfiltered_matrix.shape[1]
+    original_taxon_count = unfiltered_matrix.shape[1]
 
     def prepare_matrix(prevalence):
         minimum_occurrence = max(
@@ -759,22 +871,38 @@ def calibration_nmds(request: NmdsRequest):
 
     matrix = prepare_matrix(request.prevalence)
     if len(matrix) < 3 or matrix.shape[1] < 2:
-        return {"error": "Too few samples or genera remain after prevalence filtering.", "points": []}
+        return {"error": "Too few samples or taxa remain after prevalence filtering.", "points": []}
 
     condensed_distances = pdist(matrix.to_numpy(), metric="braycurtis")
     distances = squareform(condensed_distances)
-    supports_normalized_stress = "normalized_stress" in inspect.signature(MDS).parameters
+    mds_parameters = inspect.signature(MDS).parameters
+    supports_normalized_stress = "normalized_stress" in mds_parameters
+    uses_new_mds_api = "metric_mds" in mds_parameters
 
     def fit_nmds(dimensions, n_init, random_seed):
         options = {
             "n_components": dimensions,
-            "metric": False,
-            "dissimilarity": "precomputed",
             "random_state": random_seed,
             "n_init": n_init,
             "max_iter": 500,
             "eps": 1e-6,
         }
+        if uses_new_mds_api:
+            # scikit-learn 1.9+ separates the MDS mode from the distance
+            # metric. Supplying every value explicitly also avoids defaults
+            # whose behavior is scheduled to change in 1.10.
+            options.update({
+                "metric_mds": False,
+                "metric": "precomputed",
+                "init": "random",
+            })
+        else:
+            # Compatibility with the established API used by older deployed
+            # environments.
+            options.update({
+                "metric": False,
+                "dissimilarity": "precomputed",
+            })
         if supports_normalized_stress:
             options["normalized_stress"] = True
         fitted = MDS(**options)
@@ -858,7 +986,7 @@ def calibration_nmds(request: NmdsRequest):
                 )
             prevalence_sensitivity.append({
                 "prevalence": prevalence,
-                "genus_count": int(alternate_matrix.shape[1]),
+                "taxon_count": int(alternate_matrix.shape[1]),
                 "sample_count": int(len(common_ids)),
                 "distance_spearman": correlation,
             })
@@ -899,7 +1027,7 @@ def calibration_nmds(request: NmdsRequest):
             "sitename": value("sitename"),
             "pH": value("pH"),
             "water_table_depth": value("water_table_depth"),
-            "dominant_genus": str(dominant.loc[sampleid]),
+            "dominant_taxon": str(dominant.loc[sampleid]),
             "highlight": "target" if sampleid == target_id else "analogue" if int(sampleid) in analogue_ids else None,
         })
 
@@ -911,8 +1039,8 @@ def calibration_nmds(request: NmdsRequest):
         "iterations": int(getattr(model, "n_iter_", 0)),
         "converged": int(getattr(model, "n_iter_", 500)) < 500,
         "sample_count": len(matrix),
-        "genus_count": matrix.shape[1],
-        "removed_genus_count": original_genus_count - matrix.shape[1],
+        "taxon_count": matrix.shape[1],
+        "removed_taxon_count": original_taxon_count - matrix.shape[1],
         "sampled": sampled,
         "available_sample_count": len(available_ids),
         "prevalence": request.prevalence,
@@ -937,11 +1065,11 @@ def calibration_nmds(request: NmdsRequest):
 
 @app.post("/taxa/sample-profiles")
 def taxa_sample_profiles(request: SampleProfilesRequest):
-    ids = list(dict.fromkeys(request.sampleids))[:1000]
-    group_limit = max(2, min(request.limit, 100))
+    ids = list(dict.fromkeys(request.sampleids))[:5000]
+    group_limit = max(2, min(request.limit, 500))
     selected = (
-        genus_profiles_df[genus_profiles_df["sampleid"].isin(ids)].copy()
-        if request.level == "genus"
+        taxon_profiles_df[taxon_profiles_df["sampleid"].isin(ids)].copy()
+        if request.level in {"taxon", "species", "finest"}
         else taxa_df[taxa_df["sampleid"].isin(ids)].copy()
     )
 
@@ -954,7 +1082,7 @@ def taxa_sample_profiles(request: SampleProfilesRequest):
         sample = grouped.get(sampleid)
         if sample is None:
             continue
-        if request.level == "genus":
+        if request.level in {"taxon", "species", "finest"}:
             composition = sample[["lumped_taxon", "percentage"]].to_dict(orient="records")
             for row in composition:
                 row["abundance"] = row["percentage"]
@@ -970,7 +1098,7 @@ def taxa_sample_profiles(request: SampleProfilesRequest):
         )
         profiles.append({
             "sampleid": sampleid,
-            "dominant_genus": dominant,
+            "dominant_taxon": dominant,
             "composition": composition,
         })
 

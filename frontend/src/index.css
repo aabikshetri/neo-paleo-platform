@@ -124,6 +124,24 @@ body {
   margin-bottom: 20px;
 }
 
+.analysis-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.analysis-table th,
+.analysis-table td {
+  padding: 8px 10px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.analysis-table th {
+  color: var(--text-h);
+  white-space: nowrap;
+}
+
 @media (max-width: 640px) {
   .analysis-group__content,
   .analysis-panel {

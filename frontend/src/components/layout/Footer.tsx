@@ -15,7 +15,8 @@ export default function Footer() {
       }}
     >
       <span>Data source: Neotoma Paleoecology Database</span>
-      <span>Composition normalized within each sample before genus-level aggregation.</span>
+      <span>Composition normalized within each sample at the finest taxonomic resolution recorded by Neotoma.</span>
+      <span>Aabiskar Thapa Kshetri and Robert K. Booth, 2026. Contact: aat226@lehigh.edu · rkb205@lehigh.edu</span>
     </footer>
   );
 }

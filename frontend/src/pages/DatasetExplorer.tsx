@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import SearchFilters from "../components/search/SearchFilters";
+import SearchFilters, { type SearchFilterState } from "../components/search/SearchFilters";
 import SummaryCards from "../components/search/SummaryCards";
 import DownloadCSV from "../components/search/DownloadCSV";
 
@@ -61,13 +61,17 @@ export default function DatasetExplorer() {
   const [analogueSnapshot, setAnalogueSnapshot] = useState<Record<string, unknown> | null>(null);
   const [nmdsSnapshot, setNmdsSnapshot] = useState<Record<string, unknown> | null>(null);
 
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState<SearchFilterState>({
     site_contains: "",
     ph_min: "",
     ph_max: "",
     water_min: "",
     water_max: "",
     publication_contains: "",
+    lat_min: "",
+    lat_max: "",
+    lon_min: "",
+    lon_max: "",
   });
 
   useEffect(() => {
@@ -89,8 +93,8 @@ export default function DatasetExplorer() {
 
       const data = await getTaxaBySamples(
         sampleids,
-        "genus",
-        20
+        "taxon",
+        500
       );
 
       setTaxaRows(data);
@@ -132,6 +136,10 @@ export default function DatasetExplorer() {
       water_min: "",
       water_max: "",
       publication_contains: "",
+      lat_min: "",
+      lat_max: "",
+      lon_min: "",
+      lon_max: "",
     };
     setFilters(emptyFilters);
     setRows(allRows);
@@ -184,57 +192,20 @@ export default function DatasetExplorer() {
         onSearch={handleSearch}
         onClear={clearFilters}
         resultCount={selectedRows.length}
+        downloadControl={<DownloadCSV rows={selectedRows} />}
       />
 
       <SummaryCards rows={selectedRows} />
-
-      <AnalysisGroup
-        title="Data quality"
-        description="Check completeness and calibration coverage before interpreting results."
-        defaultOpen
-      >
-        <div className="analysis-panel">
-          <CalibrationQualityPanel rows={selectedRows} />
-        </div>
-      </AnalysisGroup>
-
-      <AnalysisGroup
-        title="Core analysis"
-        description="Compare assemblages and examine community structure."
-        defaultOpen
-      >
-        <div className="analysis-panel">
-          <ModernAnalogueSearch rows={selectedRows} onSnapshotChange={setAnalogueSnapshot} />
-        </div>
-        <div className="analysis-panel">
-          <CommunityNmds rows={selectedRows} onSnapshotChange={setNmdsSnapshot} />
-        </div>
-      </AnalysisGroup>
-
-      <AnalysisGroup
-        title="Reproducibility"
-        description="Record the active dataset selection, methods, diagnostics, and results."
-      >
-        <div className="analysis-panel">
-          <ReproducibilityPanel
-            filters={filters}
-            rows={selectedRows}
-            analogueSnapshot={analogueSnapshot}
-            nmdsSnapshot={nmdsSnapshot}
-          />
-        </div>
-      </AnalysisGroup>
 
       <AnalysisGroup
         title="Exploratory visualization"
         description="Inspect taxon composition, environmental gradients, and geography."
       >
         <div className="analysis-panel">
-        <h2>Taxa Composition</h2>
+        <h2>Taxa composition</h2>
 
         <p>
-          Genus-level taxa abundance for the currently
-          filtered samples.
+          Finest-level Neotoma taxon composition for all currently filtered samples.
         </p>
 
         {taxaLoading ? (
@@ -271,14 +242,6 @@ export default function DatasetExplorer() {
           </button>
         </div>
       )}
-
-      <div className="analysis-results-row">
-        <h3>
-          {selectedRows.length.toLocaleString()} Samples Found
-        </h3>
-
-        <DownloadCSV rows={selectedRows} />
-      </div>
 
       <div className="analysis-panel">
         <h2>Environmental Explorer</h2>
@@ -331,6 +294,42 @@ export default function DatasetExplorer() {
           <p><strong>Longitude:</strong> {selectedSite.longitude}</p>
         </div>
       )}
+      </AnalysisGroup>
+
+      <AnalysisGroup
+        title="Summary statistics of filtered dataset"
+        description="Check completeness and calibration coverage before interpreting results."
+        defaultOpen
+      >
+        <div className="analysis-panel">
+          <CalibrationQualityPanel rows={selectedRows} />
+        </div>
+      </AnalysisGroup>
+
+      <AnalysisGroup
+        title="Analyses (in development)"
+        description="Compare assemblages and examine community structure."
+      >
+        <div className="analysis-panel">
+          <ModernAnalogueSearch rows={selectedRows} onSnapshotChange={setAnalogueSnapshot} />
+        </div>
+        <div className="analysis-panel">
+          <CommunityNmds rows={selectedRows} onSnapshotChange={setNmdsSnapshot} />
+        </div>
+      </AnalysisGroup>
+
+      <AnalysisGroup
+        title="Reproducibility"
+        description="Record the active dataset selection, methods, diagnostics, and results."
+      >
+        <div className="analysis-panel">
+          <ReproducibilityPanel
+            filters={filters}
+            rows={selectedRows}
+            analogueSnapshot={analogueSnapshot}
+            nmdsSnapshot={nmdsSnapshot}
+          />
+        </div>
       </AnalysisGroup>
     </div>
   );

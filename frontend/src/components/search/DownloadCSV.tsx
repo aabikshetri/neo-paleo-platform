@@ -1,46 +1,35 @@
-// src/components/search/DownloadCSV.tsx
+import { useState } from "react";
+
+import { downloadFilteredTaxaCsv } from "../../api/taxa";
 
 type Props = {
-    rows: any[];
-  };
-  
-  export default function DownloadCSV({
-    rows,
-  }: Props) {
-  
-    function download() {
-      const csv =
-        [
-          Object.keys(rows[0]).join(","),
-          ...rows.map((row) =>
-            Object.values(row).join(",")
-          ),
-        ].join("\n");
-  
-      const blob = new Blob(
-        [csv],
-        { type: "text/csv" }
-      );
-  
-      const url =
-        window.URL.createObjectURL(blob);
-  
-      const a =
-        document.createElement("a");
-  
-      a.href = url;
-  
-      a.download =
-        "neotoma_results.csv";
-  
-      a.click();
+  rows: Array<{ sampleid?: number | null }>;
+};
+
+export default function DownloadCSV({ rows }: Props) {
+  const [loading, setLoading] = useState(false);
+  const sampleids = Array.from(new Set(rows.flatMap((row) =>
+    row.sampleid == null ? [] : [row.sampleid]
+  )));
+
+  async function download() {
+    if (!sampleids.length) return;
+    setLoading(true);
+    try {
+      await downloadFilteredTaxaCsv(sampleids);
+    } catch (error) {
+      console.error(error);
+      window.alert("The complete taxa CSV could not be downloaded. Confirm that the updated backend is running.");
+    } finally {
+      setLoading(false);
     }
-  
-    if (!rows.length) return null;
-  
-    return (
-      <button onClick={download}>
-        Download CSV
-      </button>
-    );
   }
+
+  if (!sampleids.length) return null;
+
+  return (
+    <button type="button" onClick={download} disabled={loading}>
+      {loading ? "Preparing complete CSV…" : "Download complete taxa CSV"}
+    </button>
+  );
+}

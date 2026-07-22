@@ -17,13 +17,13 @@ export default function Navbar() {
       <Link
         to="/"
         style={{ color: "inherit", textDecoration: "none" }}
-        aria-label="Paleoecology Analytics Platform home"
+        aria-label="Neotoma Testate Amoeba Database Explorer home"
       >
         <strong style={{ display: "block", color: "var(--text-h)", fontSize: "1.15rem" }}>
-          Paleoecology Analytics Platform
+          Neotoma Testate Amoeba Database Explorer: Surface-samples and Paleoecology
         </strong>
         <span style={{ opacity: 0.72, fontSize: "0.9rem" }}>
-          Testate Amoebae Surface Sample Explorer
+          Finest recorded taxonomic resolution
         </span>
       </Link>
 
@@ -36,7 +36,7 @@ export default function Navbar() {
           opacity: 0.78,
         }}
       >
-        Genus-level exploratory analysis
+        Surface-sample explorer
       </span>
     </header>
   );

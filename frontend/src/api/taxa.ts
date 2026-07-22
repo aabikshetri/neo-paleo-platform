@@ -6,7 +6,7 @@ const API =
 
 export type TaxaSampleProfile = {
   sampleid: number;
-  dominant_genus: string;
+  dominant_taxon: string;
   composition: Array<{
     lumped_taxon: string;
     percentage: number;
@@ -27,7 +27,7 @@ export type CalibrationQuality = {
   missing_water_table: number;
   missing_doi: number;
   low_richness_samples: number;
-  median_genus_richness: number | null;
+  median_taxon_richness: number | null;
   ph_range: { min: number | null; max: number | null };
   water_table_range: { min: number | null; max: number | null };
   water_table_units: string[];
@@ -43,7 +43,9 @@ export type AnalogueMatch = {
   pH?: number | null;
   water_table_depth?: number | null;
   water_table_depth_units?: string | null;
-  shared_genera: string[];
+  delta_pH?: number | null;
+  delta_water_table_depth?: number | null;
+  shared_taxa: string[];
   composition: Array<{ lumped_taxon: string; percentage: number }>;
 };
 
@@ -54,6 +56,11 @@ export type AnalogueResult = {
   exclude_same_site?: boolean;
   exclude_same_doi?: boolean;
   method?: string;
+  target_environment?: {
+    pH?: number | null;
+    water_table_depth?: number | null;
+    water_table_depth_units?: string | null;
+  };
   target_composition?: Array<{ lumped_taxon: string; percentage: number }>;
   error?: string;
   matches: AnalogueMatch[];
@@ -67,7 +74,7 @@ export type NmdsPoint = {
   sitename?: string | null;
   pH?: number | null;
   water_table_depth?: number | null;
-  dominant_genus: string;
+  dominant_taxon: string;
   highlight?: "target" | "analogue" | null;
 };
 
@@ -80,8 +87,8 @@ export type NmdsResult = {
   iterations?: number;
   converged?: boolean;
   sample_count?: number;
-  genus_count?: number;
-  removed_genus_count?: number;
+  taxon_count?: number;
+  removed_taxon_count?: number;
   sampled?: boolean;
   available_sample_count?: number;
   prevalence?: number;
@@ -104,7 +111,7 @@ export type NmdsResult = {
     }>;
     prevalence: Array<{
       prevalence: number;
-      genus_count: number;
+      taxon_count: number;
       sample_count: number;
       distance_spearman: number | null;
     }>;
@@ -113,11 +120,12 @@ export type NmdsResult = {
 };
 
 const profileRequests = new Map<string, Promise<TaxaSampleProfile[]>>();
+const taxonValueRequests = new Map<string, Promise<TaxonSampleValue[]>>();
 
 export async function getTaxaBySamples(
   sampleids: number[],
-  level = "genus",
-  limit = 25
+  level = "taxon",
+  limit = 500
 ) {
   const response = await axios.post(`${API}/taxa/aggregate`, {
     sampleids,
@@ -130,7 +138,7 @@ export async function getTaxaBySamples(
 
 export async function getTaxaCompositionBySample(
   sampleids: Array<number | string>,
-  level = "genus",
+  level = "taxon",
   limit = 8
 ) {
   const response = await axios.get(
@@ -159,7 +167,7 @@ export async function getTaxaSampleProfiles(
   if (profileRequests.size >= 20) profileRequests.clear();
   const request = axios.post(`${API}/taxa/sample-profiles`, {
     sampleids: ids,
-    level: "genus",
+    level: "taxon",
     limit,
   }).then((response) => response.data).catch((error) => {
     profileRequests.delete(key);
@@ -167,6 +175,48 @@ export async function getTaxaSampleProfiles(
   });
   profileRequests.set(key, request);
   return request;
+}
+
+export type TaxonSampleValue = {
+  sampleid: number;
+  combined_percentage: number;
+  composition: Array<{ lumped_taxon: string; percentage: number }>;
+};
+
+export async function getTaxonSampleValues(
+  sampleids: number[],
+  taxa: string[]
+): Promise<TaxonSampleValue[]> {
+  const ids = Array.from(new Set(sampleids)).sort((a, b) => a - b);
+  const selectedTaxa = Array.from(new Set(taxa));
+  const key = `${ids.join(",")}|${selectedTaxa.join("|")}`;
+  const existing = taxonValueRequests.get(key);
+  if (existing) return existing;
+
+  if (taxonValueRequests.size >= 20) taxonValueRequests.clear();
+  const request = axios.post(`${API}/taxa/sample-values`, {
+    sampleids: ids,
+    taxa: selectedTaxa,
+  }).then((response) => response.data).catch((error) => {
+    taxonValueRequests.delete(key);
+    throw error;
+  });
+  taxonValueRequests.set(key, request);
+  return request;
+}
+
+export async function downloadFilteredTaxaCsv(sampleids: number[]) {
+  const response = await axios.post(
+    `${API}/export/taxa-csv`,
+    { sampleids },
+    { responseType: "blob" }
+  );
+  const url = URL.createObjectURL(response.data);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "neotoma_testate_amoebae_filtered_taxa.csv";
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function getCalibrationQuality(

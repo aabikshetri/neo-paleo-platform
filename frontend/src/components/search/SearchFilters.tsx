@@ -4,15 +4,20 @@ import { getPublicationOptions } from "../../api/search";
 
 type PublicationOption = {
   doi: string;
+  citation: string;
+  filter_value: string;
   sitename?: string | null;
 };
 
+export type SearchFilterState = Record<string, string>;
+
 type Props = {
-    filters: any;
-    setFilters: any;
+    filters: SearchFilterState;
+    setFilters: React.Dispatch<React.SetStateAction<SearchFilterState>>;
     onSearch: () => void;
     onClear: () => void;
     resultCount: number;
+    downloadControl?: React.ReactNode;
   };
   
   export default function SearchFilters({
@@ -21,6 +26,7 @@ type Props = {
     onSearch,
     onClear,
     resultCount,
+    downloadControl,
   }: Props) {
     const [publications, setPublications] = useState<PublicationOption[]>([]);
 
@@ -48,7 +54,10 @@ type Props = {
       >
         <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
           <h3 style={{ margin: 0 }}>Filter samples</h3>
-          <span style={{ opacity: 0.75 }}>{resultCount.toLocaleString()} results</span>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ opacity: 0.75 }}>{resultCount.toLocaleString()} results</span>
+            {downloadControl}
+          </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "14px", marginTop: "16px", textAlign: "left" }}>
@@ -58,12 +67,12 @@ type Props = {
           </label>
 
           <label style={{ gridColumn: "1 / -1" }}>
-            <span style={{ display: "block", marginBottom: "4px" }}>Site and dataset DOI</span>
+            <span style={{ display: "block", marginBottom: "4px" }}>Publication or dataset citation</span>
             <select style={{ width: "100%" }} value={filters.publication_contains || ""} onChange={(e) => setFilters({ ...filters, publication_contains: e.target.value })}>
-              <option value="">All DOI records</option>
+              <option value="">All citation records</option>
               {publications.map((publication) => (
-                <option key={publication.doi} value={publication.doi}>
-                  {publication.sitename ? `${publication.sitename} — ${publication.doi}` : publication.doi}
+                <option key={`${publication.filter_value}-${publication.citation}`} value={publication.filter_value}>
+                  {publication.citation}
                 </option>
               ))}
             </select>
@@ -74,6 +83,10 @@ type Props = {
             ["ph_max", "Maximum pH"],
             ["water_min", "Minimum WTD (cm)"],
             ["water_max", "Maximum WTD (cm)"],
+            ["lat_min", "Minimum latitude"],
+            ["lat_max", "Maximum latitude"],
+            ["lon_min", "Minimum longitude"],
+            ["lon_max", "Maximum longitude"],
           ].map(([field, label]) => (
             <label key={field}>
               <span style={{ display: "block", marginBottom: "4px" }}>{label}</span>

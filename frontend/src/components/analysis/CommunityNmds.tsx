@@ -15,7 +15,7 @@ function stressInterpretation(stress?: number) {
   return "unreliable representation";
 }
 
-function categoryGroups(points: NmdsPoint[], field: "sitename" | "dominant_genus") {
+function categoryGroups(points: NmdsPoint[], field: "sitename" | "dominant_taxon") {
   const counts = new Map<string, number>();
   points.forEach((point) => {
     const value = point[field] || "Unknown";
@@ -27,7 +27,7 @@ function categoryGroups(points: NmdsPoint[], field: "sitename" | "dominant_genus
   const groups = new Map<string, NmdsPoint[]>();
   points.forEach((point) => {
     const raw = point[field] || "Unknown";
-    const value = retained.has(raw) ? raw : field === "sitename" ? "Other sites" : "Other genera";
+    const value = retained.has(raw) ? raw : field === "sitename" ? "Other sites" : "Other taxa";
     groups.set(value, [...(groups.get(value) ?? []), point]);
   });
   return groups;
@@ -50,7 +50,7 @@ export default function CommunityNmds({
   const [nInit, setNInit] = useState(10);
   const [targetSampleid, setTargetSampleid] = useState<number | null>(null);
   const [runSensitivity, setRunSensitivity] = useState(true);
-  const [colorBy, setColorBy] = useState<"pH" | "water_table_depth" | "dominant_genus" | "sitename">("pH");
+  const [colorBy, setColorBy] = useState<"pH" | "water_table_depth" | "dominant_taxon" | "sitename">("pH");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<NmdsResult | null>(null);
   const [resultKey, setResultKey] = useState("");
@@ -89,7 +89,7 @@ export default function CommunityNmds({
 
   function downloadCoordinates() {
     if (!result?.points.length) return;
-    const header = "sampleid,sitename,nmds1,nmds2,nmds3,pH,water_table_depth,dominant_genus,highlight";
+    const header = "sampleid,sitename,nmds1,nmds2,nmds3,pH,water_table_depth,dominant_taxon,highlight";
     const rows = result.points.map((point) => [
       point.sampleid,
       JSON.stringify(point.sitename ?? ""),
@@ -98,7 +98,7 @@ export default function CommunityNmds({
       point.nmds3 ?? "",
       point.pH ?? "",
       point.water_table_depth ?? "",
-      JSON.stringify(point.dominant_genus),
+      JSON.stringify(point.dominant_taxon),
       point.highlight ?? "",
     ].join(","));
     const url = URL.createObjectURL(new Blob([[header, ...rows].join("\n")], { type: "text/csv" }));
@@ -202,8 +202,8 @@ export default function CommunityNmds({
         stress_by_dimension: result.stress_by_dimension,
         sample_count: result.sample_count,
         available_sample_count: result.available_sample_count,
-        genus_count: result.genus_count,
-        removed_genus_count: result.removed_genus_count,
+        taxon_count: result.taxon_count,
+        removed_taxon_count: result.removed_taxon_count,
         converged: result.converged,
         iterations: result.iterations,
         sampling_method: result.sampling_method,
@@ -217,7 +217,7 @@ export default function CommunityNmds({
     <section>
       <div style={{ textAlign: "left" }}>
         <h2>Community NMDS</h2>
-        <p>Ordination of filtered samples using Bray–Curtis dissimilarity on normalized genus composition.</p>
+        <p>Ordination of filtered samples using Bray–Curtis dissimilarity on normalized finest-level Neotoma taxon composition.</p>
       </div>
       <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "end", marginTop: "16px" }}>
         <label style={{ textAlign: "left" }}>
@@ -248,7 +248,7 @@ export default function CommunityNmds({
           <select value={colorBy} onChange={(event) => setColorBy(event.target.value as typeof colorBy)}>
             <option value="pH">pH</option>
             <option value="water_table_depth">Water-table depth</option>
-            <option value="dominant_genus">Dominant genus</option>
+            <option value="dominant_taxon">Dominant taxon</option>
             <option value="sitename">Site</option>
           </select>
         </label>
@@ -280,7 +280,7 @@ export default function CommunityNmds({
       {result?.points.length ? (
         <>
           <p style={{ textAlign: "left", marginTop: "18px" }}>
-            {result.dimensions}D stress {result.stress?.toFixed(3)} ({stressInterpretation(result.stress)}); {result.sample_count?.toLocaleString()} samples and {result.genus_count?.toLocaleString()} genera ({result.removed_genus_count?.toLocaleString()} removed by prevalence filtering and retained compositions renormalized to 100%); {result.converged ? `converged in ${result.iterations} iterations` : `iteration limit reached (${result.iterations})`}. {result.sampled ? `${result.sample_count?.toLocaleString()} of ${result.available_sample_count?.toLocaleString()} eligible samples were selected using ${result.sampling_method}.` : "All eligible samples were included."}
+            {result.dimensions}D stress {result.stress?.toFixed(3)} ({stressInterpretation(result.stress)}); {result.sample_count?.toLocaleString()} samples and {result.taxon_count?.toLocaleString()} taxa ({result.removed_taxon_count?.toLocaleString()} removed by prevalence filtering and retained compositions renormalized to 100%); {result.converged ? `converged in ${result.iterations} iterations` : `iteration limit reached (${result.iterations})`}. {result.sampled ? `${result.sample_count?.toLocaleString()} of ${result.available_sample_count?.toLocaleString()} eligible samples were selected using ${result.sampling_method}.` : "All eligible samples were included."}
           </p>
           <Suspense fallback={<div style={{ minHeight: "500px", display: "grid", placeItems: "center" }}>Loading ordination plot…</div>}>
             <Plot
@@ -384,13 +384,13 @@ export default function CommunityNmds({
               <div style={{ overflowX: "auto", marginTop: "12px" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
-                    <tr><th>Prevalence threshold</th><th>Retained genera</th><th>Samples compared</th><th>Bray–Curtis rank correlation</th></tr>
+                    <tr><th>Prevalence threshold</th><th>Retained taxa</th><th>Samples compared</th><th>Bray–Curtis rank correlation</th></tr>
                   </thead>
                   <tbody>
                     {result.sensitivity.prevalence.map((test) => (
                       <tr key={test.prevalence}>
                         <td>{(test.prevalence * 100).toFixed(1)}%</td>
-                        <td>{test.genus_count}</td>
+                        <td>{test.taxon_count}</td>
                         <td>{test.sample_count}</td>
                         <td>{test.distance_spearman?.toFixed(3) ?? "—"}</td>
                       </tr>
