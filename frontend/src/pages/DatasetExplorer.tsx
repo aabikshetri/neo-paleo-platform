@@ -199,29 +199,8 @@ export default function DatasetExplorer() {
 
       <AnalysisGroup
         title="Exploratory visualization"
-        description="Inspect taxon composition, environmental gradients, and geography."
+        description="Inspect community composition, environmental gradients, and geography."
       >
-        <div className="analysis-panel">
-        <h2>Taxa composition</h2>
-
-        <p>
-          Finest-level Neotoma taxon composition for all currently filtered samples.
-        </p>
-
-        {taxaLoading ? (
-          <p>Loading taxa composition...</p>
-        ) : taxaRows.length === 0 ? (
-          <p>No taxa data loaded for current selection.</p>
-        ) : (
-          <TaxaCompositionChart
-            data={taxaRows}
-            referenceData={allTaxaRows}
-            rows={selectedRows}
-            referenceRows={allRows}
-          />
-        )}
-        </div>
-
       {bbox && (
         <div
           style={{
@@ -244,7 +223,7 @@ export default function DatasetExplorer() {
       )}
 
       <div className="analysis-panel">
-        <h2>Environmental Explorer</h2>
+        <h2>Geographic distribution and environmental gradients</h2>
 
         <p>
           Explore environmental relationships and geographic
@@ -266,6 +245,9 @@ export default function DatasetExplorer() {
             Map Explorer
           </button>
         </div>
+        <p style={{ opacity: 0.72 }}>
+          Use the scatter plot to click a sample, or switch to Map Explorer and click a map marker to display its information.
+        </p>
 
         {showMap ? (
           <SiteMap
@@ -275,7 +257,10 @@ export default function DatasetExplorer() {
           />
         ) : (
           <ViewportMount>
-            <LinkedEnvironmentalExplorer rows={selectedRows} />
+            <LinkedEnvironmentalExplorer
+              rows={selectedRows}
+              onSampleSelect={setSelectedSite}
+            />
           </ViewportMount>
         )}
       </div>
@@ -294,11 +279,30 @@ export default function DatasetExplorer() {
           <p><strong>Longitude:</strong> {selectedSite.longitude}</p>
         </div>
       )}
+
+      <div className="analysis-panel">
+        <h2>Multi-taxon visualization</h2>
+
+        <p>Taxa abundance along environmental gradients.</p>
+
+        {taxaLoading ? (
+          <p>Loading taxa composition...</p>
+        ) : taxaRows.length === 0 ? (
+          <p>No taxa data loaded for current selection.</p>
+        ) : (
+          <TaxaCompositionChart
+            data={taxaRows}
+            referenceData={allTaxaRows}
+            rows={selectedRows}
+            referenceRows={allRows}
+          />
+        )}
+      </div>
       </AnalysisGroup>
 
       <AnalysisGroup
         title="Summary statistics of filtered dataset"
-        description="Check completeness and calibration coverage before interpreting results."
+        description=""
         defaultOpen
       >
         <div className="analysis-panel">

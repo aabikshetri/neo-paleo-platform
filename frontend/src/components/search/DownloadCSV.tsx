@@ -29,7 +29,7 @@ export default function DownloadCSV({ rows }: Props) {
 
   return (
     <button type="button" onClick={download} disabled={loading}>
-      {loading ? "Preparing complete CSV…" : "Download complete taxa CSV"}
+      {loading ? "Preparing CSV…" : "Download CSV"}
     </button>
   );
 }

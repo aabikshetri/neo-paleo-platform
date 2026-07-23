@@ -31,6 +31,7 @@ export default function TaxaCompositionChart(props: Props) {
   const [dimensions, setDimensions] = useState<2 | 3>(2);
   const [aggregation, setAggregation] = useState<"combined" | "individual">("combined");
   const [showBackground, setShowBackground] = useState(true);
+  const [responseVariable, setResponseVariable] = useState<"pH" | "water_table_depth">("water_table_depth");
   const [plotRevision, setPlotRevision] = useState(0);
   const [result, setResult] = useState<{ key: string; values: TaxonSampleValue[] }>({ key: "", values: [] });
 
@@ -41,7 +42,10 @@ export default function TaxaCompositionChart(props: Props) {
     }))
     .filter((row) => row.taxon !== "Other")
     .sort((a, b) => b.percentage - a.percentage), [data]);
-  const taxa = useMemo(() => chartData.map((row) => row.taxon), [chartData]);
+  const taxa = useMemo(
+    () => chartData.map((row) => row.taxon).sort((a, b) => a.localeCompare(b)),
+    [chartData]
+  );
   const displayedTaxa = useMemo(() => {
     const activeTaxa = selectedTaxa.filter((taxon) => taxa.includes(taxon));
     return activeTaxa.length ? activeTaxa : taxa.slice(0, 1);
@@ -83,6 +87,17 @@ export default function TaxaCompositionChart(props: Props) {
   const combinedMean = displayedTaxa.reduce((sum, taxon) =>
     sum + (chartData.find((row) => row.taxon === taxon)?.percentage ?? 0), 0);
   const selectedLabel = displayedTaxa.join(" + ");
+  const responseRows = validRows.map((row) => ({
+    environmental: Number(row[responseVariable]),
+    abundance: aggregation === "combined"
+      ? combinedFor(row)
+      : displayedTaxa.reduce((sum, taxon) => sum + percentageFor(row, taxon), 0),
+    row,
+  })).filter((item) => Number.isFinite(item.environmental));
+  const responseWeight = responseRows.reduce((sum, item) => sum + item.abundance, 0);
+  const optimum = responseWeight > 0
+    ? responseRows.reduce((sum, item) => sum + item.environmental * item.abundance, 0) / responseWeight
+    : null;
 
   const backgroundTrace = dimensions === 3 ? {
     x: validRows.map((row) => row.pH),
@@ -178,7 +193,7 @@ export default function TaxaCompositionChart(props: Props) {
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
           <label>View <select value={dimensions} onChange={(event) => setDimensions(Number(event.target.value) as 2 | 3)}><option value={2}>2D pH–WTD</option><option value={3}>3D composition</option></select></label>
           <label>Display <select value={aggregation} onChange={(event) => setAggregation(event.target.value as typeof aggregation)}><option value="combined">Combined selection</option><option value="individual">Individual taxa</option></select></label>
-          <label><input type="checkbox" checked={showBackground} onChange={(event) => setShowBackground(event.target.checked)} /> Filled background samples</label>
+          <label><input type="checkbox" checked={showBackground} onChange={(event) => setShowBackground(event.target.checked)} /> Display all samples</label>
           <button type="button" onClick={() => setPlotRevision((value) => value + 1)}>Reset view</button>
         </div>
       </div>
@@ -220,6 +235,63 @@ export default function TaxaCompositionChart(props: Props) {
       <p style={{ opacity: 0.72 }}>
         Filled gray markers show every complete sample in the current filter. Ring area tracks the recorded composition percentage for each selected taxon; combined mode sums the selected taxa within each sample.
       </p>
+
+      <section style={{ marginTop: "22px", borderTop: "1px solid var(--border)", paddingTop: "20px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", alignItems: "end" }}>
+          <div style={{ textAlign: "left" }}>
+            <h3 style={{ marginBottom: "4px" }}>Univariate visualization</h3>
+            <p style={{ opacity: 0.72 }}>
+              Combined abundance of {selectedLabel} along the selected environmental gradient.
+            </p>
+            <p style={{ opacity: 0.72 }}>
+              Weighted-average optimum: {optimum == null ? "not available" : optimum.toFixed(2)}.
+            </p>
+          </div>
+          <label>
+            Gradient{" "}
+            <select value={responseVariable} onChange={(event) => setResponseVariable(event.target.value as typeof responseVariable)}>
+              <option value="water_table_depth">Water-table depth</option>
+              <option value="pH">pH</option>
+            </select>
+          </label>
+        </div>
+        <Suspense fallback={<p>Loading response chart…</p>}>
+          <Plot
+            data={[
+              {
+                x: responseRows.map((item) => item.environmental),
+                y: responseRows.map((item) => item.abundance),
+                text: responseRows.map((item) => `${item.row.sitename || "Unknown site"}<br>Sample ${item.row.sampleid}`),
+                hovertemplate: "%{text}<br>x %{x:.2f}<br>abundance %{y:.2f}%<extra></extra>",
+                mode: "markers",
+                type: "scatter",
+                name: selectedLabel,
+                marker: { color: taxonColor(displayedTaxa[0]), opacity: 0.75, size: 8 },
+              },
+              ...(optimum == null ? [] : [{
+                x: [optimum, optimum],
+                y: [0, Math.max(...responseRows.map((item) => item.abundance), 1)],
+                mode: "lines" as const,
+                type: "scatter" as const,
+                name: "Weighted optimum",
+                line: { color: taxonColor(displayedTaxa[0]), dash: "dash", width: 2 },
+                hovertemplate: `Weighted optimum: ${optimum.toFixed(2)}<extra></extra>`,
+              }]),
+            ]}
+            layout={{
+              autosize: true,
+              height: 360,
+              margin: { l: 62, r: 20, t: 20, b: 58 },
+              xaxis: { title: { text: responseVariable === "pH" ? "pH" : "Water-table depth" } },
+              yaxis: { title: { text: "Combined abundance (%)" }, rangemode: "tozero" },
+              paper_bgcolor: "transparent",
+              plot_bgcolor: "transparent",
+            }}
+            config={{ responsive: true, displaylogo: false }}
+            style={{ width: "100%" }}
+          />
+        </Suspense>
+      </section>
     </div>
   );
 }

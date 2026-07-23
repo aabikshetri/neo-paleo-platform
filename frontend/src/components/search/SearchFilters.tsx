@@ -3,10 +3,13 @@ import { useEffect, useState } from "react";
 import { getPublicationOptions } from "../../api/search";
 
 type PublicationOption = {
-  doi: string;
+  publicationid?: number;
   citation: string;
   filter_value: string;
-  sitename?: string | null;
+  sample_count?: number;
+  primary_sample_count?: number;
+  year?: string | null;
+  doi?: string | null;
 };
 
 export type SearchFilterState = Record<string, string>;
@@ -67,12 +70,12 @@ type Props = {
           </label>
 
           <label style={{ gridColumn: "1 / -1" }}>
-            <span style={{ display: "block", marginBottom: "4px" }}>Publication or dataset citation</span>
+            <span style={{ display: "block", marginBottom: "4px" }}>Publication</span>
             <select style={{ width: "100%" }} value={filters.publication_contains || ""} onChange={(e) => setFilters({ ...filters, publication_contains: e.target.value })}>
-              <option value="">All citation records</option>
+              <option value="">All publications</option>
               {publications.map((publication) => (
                 <option key={`${publication.filter_value}-${publication.citation}`} value={publication.filter_value}>
-                  {publication.citation}
+                  {publication.citation}{publication.sample_count ? ` (${publication.sample_count.toLocaleString()} samples)` : ""}
                 </option>
               ))}
             </select>

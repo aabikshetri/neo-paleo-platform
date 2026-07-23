@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import json
 import inspect
 import io
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 from fastapi import FastAPI
@@ -38,6 +41,7 @@ TAXA_INDEX = (
 )
 
 SITES_INDEX = BASE_DIR / "data" / "processed" / "testate_amoebae_surface_sites.csv"
+PUBLICATIONS_INDEX = BASE_DIR / "data" / "processed" / "dataset_publications.csv"
 
 app = FastAPI()
 
@@ -96,6 +100,19 @@ print("Loading taxa:", TAXA_INDEX)
 print("Taxa exists:", TAXA_INDEX.exists())
 
 taxa_df = pd.read_csv(TAXA_INDEX)
+
+if PUBLICATIONS_INDEX.exists():
+    dataset_publications_df = pd.read_csv(PUBLICATIONS_INDEX)
+    dataset_publications_df["datasetid"] = pd.to_numeric(
+        dataset_publications_df["datasetid"], errors="coerce"
+    ).astype("Int64")
+    dataset_publications_df["publicationid"] = pd.to_numeric(
+        dataset_publications_df["publicationid"], errors="coerce"
+    ).astype("Int64")
+else:
+    dataset_publications_df = pd.DataFrame(
+        columns=["datasetid", "publicationid", "primarypub", "citation"]
+    )
 
 taxa_df["abundance"] = pd.to_numeric(
     taxa_df["abundance"],
@@ -420,27 +437,40 @@ def taxa_top(limit: int = 25):
 
 @app.get("/publication-options")
 def publication_options():
-    columns = ["datasetid", "sitename", "doi", "investigators"]
-    options = df[[column for column in columns if column in df]].dropna(subset=["doi"]).copy()
-    options = options.drop_duplicates(subset=["datasetid"])
-    options["doi"] = options["doi"].map(lambda value: "; ".join(sorted(doi_tokens(value))))
-    options = options[options["doi"].ne("")]
-    def dataset_citation(row):
-        investigators = row.get("investigators")
-        investigator_text = str(investigators) if pd.notna(investigators) else ""
-        names = [name.strip() for name in investigator_text.split(";") if name.strip()]
-        authors = "; ".join(names[:3]) + ("; et al." if len(names) > 3 else "")
-        return (
-            f"{authors or 'Unknown author'}. Neotoma Testate Amoebae dataset "
-            f"{int(row['datasetid'])}: {row.get('sitename') or 'Unknown site'}. "
-            f"https://doi.org/{row['doi'].split(';')[0].strip()}"
-        )
+    if dataset_publications_df.empty:
+        return []
 
-    options["citation"] = options.apply(dataset_citation, axis=1)
-    options["filter_value"] = options["doi"].str.split(";").str[0].str.strip()
-    options = options.sort_values(["citation", "datasetid"], na_position="last")
+    local_samples = df[["datasetid", "sampleid"]].drop_duplicates()
+    options = dataset_publications_df.merge(local_samples, on="datasetid", how="inner")
+    options = options.dropna(subset=["publicationid", "citation"])
+    options = (
+        options.groupby(
+            ["publicationid", "citation", "year", "doi"], as_index=False, dropna=False
+        )
+        .agg(
+            sample_count=("sampleid", "nunique"),
+            primary_sample_count=(
+                "primarypub",
+                lambda values: int(pd.Series(values).fillna(False).astype(bool).sum()),
+            ),
+        )
+    )
+    options["filter_value"] = options["publicationid"].map(
+        lambda value: f"publication:{int(value)}"
+    )
+    options = options.sort_values(["citation"], key=lambda series: series.str.casefold())
     options = options.astype(object).where(pd.notnull(options), None)
-    return options.to_dict(orient="records")
+    return options[
+        [
+            "publicationid",
+            "citation",
+            "year",
+            "doi",
+            "filter_value",
+            "sample_count",
+            "primary_sample_count",
+        ]
+    ].to_dict(orient="records")
 
 @app.get("/taxa/by-samples")
 def taxa_by_samples(sampleids: str, level: str = "taxon", limit: int = 25):
@@ -588,22 +618,20 @@ def export_taxa_csv(request: CalibrationRequest):
     observations = taxa_df[taxa_df["sampleid"].isin(ids)].copy()
     observations["abundance"] = pd.to_numeric(observations["abundance"], errors="coerce")
     observations = observations.dropna(subset=["sampleid", "taxon_name", "abundance"])
-    # Preserve every raw taxon row in the export, while calculating composition
-    # from positive observations only—the same rule used by every analysis.
-    positive_totals = (
-        observations[observations["abundance"] > 0]
-        .groupby("sampleid")["abundance"]
-        .sum()
-        .rename("positive_sample_total")
+    # Pivot to one sample per row for comparison in a spreadsheet; taxa absent
+    # from a sample are represented as zero.
+    wide_abundance = observations.pivot_table(
+        index="sampleid",
+        columns="taxon_name",
+        values="abundance",
+        aggfunc="sum",
+        fill_value=0,
     )
-    observations = observations.join(positive_totals, on="sampleid")
-    observations["composition_percent"] = np.where(
-        (observations["abundance"] > 0) & (observations["positive_sample_total"] > 0),
-        observations["abundance"] / observations["positive_sample_total"] * 100,
-        0.0,
-    )
-    taxon_columns = ["sampleid", "taxonid", "taxon_name", "abundance", "units", "taxongroup", "ecologicalgroup", "composition_percent"]
-    export = metadata.merge(observations[taxon_columns], on="sampleid", how="left")
+    wide_abundance.columns = [f"taxon_{name}_abundance" for name in wide_abundance.columns]
+    wide_abundance = wide_abundance.reset_index()
+    export = metadata.merge(wide_abundance, on="sampleid", how="left")
+    taxon_columns = [column for column in export if column.startswith("taxon_")]
+    export[taxon_columns] = export[taxon_columns].fillna(0)
     buffer = io.StringIO()
     export.to_csv(buffer, index=False)
     buffer.seek(0)
@@ -629,7 +657,7 @@ class NmdsRequest(BaseModel):
     random_seed: int = 42
     n_init: int = 10
     dimensions: int = 2
-    target_sampleid: int | None = None
+    target_sampleid: Optional[int] = None
     run_sensitivity: bool = True
 
 
@@ -1107,20 +1135,20 @@ def taxa_sample_profiles(request: SampleProfilesRequest):
 
 @app.get("/search")
 def search(
-    ph_min: float | None = None,
-    ph_max: float | None = None,
+    ph_min: Optional[float] = None,
+    ph_max: Optional[float] = None,
 
-    water_min: float | None = None,
-    water_max: float | None = None,
+    water_min: Optional[float] = None,
+    water_max: Optional[float] = None,
 
-    lat_min: float | None = None,
-    lat_max: float | None = None,
+    lat_min: Optional[float] = None,
+    lat_max: Optional[float] = None,
 
-    lon_min: float | None = None,
-    lon_max: float | None = None,
+    lon_min: Optional[float] = None,
+    lon_max: Optional[float] = None,
 
-    site_contains: str | None = None,
-    publication_contains: str | None = None,
+    site_contains: Optional[str] = None,
+    publication_contains: Optional[str] = None,
 ):
 
     result = df.copy()
@@ -1148,9 +1176,20 @@ def search(
 
     if publication_contains:
         query = publication_contains.strip()
-        result = result[
-            result["doi"].astype(str).str.contains(query, case=False, na=False)
-        ]
+        if query.startswith("publication:"):
+            publicationid = query.removeprefix("publication:")
+            if publicationid.isdigit():
+                matching_dataset_ids = dataset_publications_df.loc[
+                    dataset_publications_df["publicationid"].eq(int(publicationid)),
+                    "datasetid",
+                ]
+                result = result[result["datasetid"].isin(matching_dataset_ids)]
+            else:
+                result = result.iloc[0:0]
+        else:
+            result = result[
+                result["doi"].astype(str).str.contains(query, case=False, na=False)
+            ]
 
     result = result.copy()
 

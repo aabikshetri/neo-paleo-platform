@@ -37,7 +37,7 @@ export default function CalibrationQualityPanel({ rows }: { rows: SampleRow[] })
   const quality = result.key === requestKey ? result.data : null;
   if (!quality) return (
     <section style={{ textAlign: "left" }}>
-      <h2>Calibration data quality</h2>
+      <h2>Data coverage</h2>
       <p>{errorKey === requestKey
         ? "Quality checks are unavailable. Confirm that the updated backend is running."
         : ids.length > 0 ? "Checking calibration coverage…" : "No samples are available for quality checks."}</p>
@@ -60,7 +60,7 @@ export default function CalibrationQualityPanel({ rows }: { rows: SampleRow[] })
     <section>
       <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", alignItems: "baseline" }}>
         <div style={{ textAlign: "left" }}>
-          <h2>Calibration data quality</h2>
+          <h2>Data coverage</h2>
           <p>Coverage and comparability checks for the current filtered dataset.</p>
         </div>
         <span>{quality.sample_count.toLocaleString()} samples · {quality.site_count.toLocaleString()} sites · {(quality.dataset_count ?? 0).toLocaleString()} datasets · {(quality.unique_doi_count ?? quality.publication_count ?? 0).toLocaleString()} unique dataset DOIs</span>

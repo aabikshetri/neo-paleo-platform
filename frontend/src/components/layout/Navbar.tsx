@@ -1,6 +1,12 @@
 import { Link } from "react-router-dom";
 
 export default function Navbar() {
+  const accessed = new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(new Date());
+
   return (
     <header
       style={{
@@ -23,7 +29,7 @@ export default function Navbar() {
           Neotoma Testate Amoeba Database Explorer: Surface-samples and Paleoecology
         </strong>
         <span style={{ opacity: 0.72, fontSize: "0.9rem" }}>
-          Finest recorded taxonomic resolution
+          Database accessed: {accessed}
         </span>
       </Link>
 
