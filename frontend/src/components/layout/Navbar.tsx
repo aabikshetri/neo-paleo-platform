@@ -23,10 +23,10 @@ export default function Navbar() {
       <Link
         to="/"
         style={{ color: "inherit", textDecoration: "none" }}
-        aria-label="Neotoma Testate Amoeba Database Explorer home"
+        aria-label="AmoebaScope home"
       >
         <strong style={{ display: "block", color: "var(--text-h)", fontSize: "1.15rem" }}>
-          Neotoma Testate Amoeba Database Explorer: Surface-samples and Paleoecology
+          AmoebaScope: exploration and visualization of testate amoeba ecology and paleoecology using the Neotoma database.
         </strong>
         <span style={{ opacity: 0.72, fontSize: "0.9rem" }}>
           Database accessed: {accessed}

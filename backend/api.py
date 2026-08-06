@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import inspect
 import io
-from pathlib import Path
+import os
 from typing import Optional
 
 import pandas as pd
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
@@ -23,96 +24,47 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import MDS
 from sklearn.isotonic import IsotonicRegression
 
-BASE_DIR = Path(__file__).resolve().parent
-
-INDEX = (
-    BASE_DIR /
-    "data" /
-    "processed" /
-    "testate_search_index.csv"
+from backend.database import (
+    calibration_quality_postgres,
+    load_runtime_frames,
+    publication_options_postgres,
+    search_postgres,
+    stream_taxa_csv_postgres,
+    taxa_aggregate_postgres,
+    taxon_sample_values_postgres,
+    using_postgres,
 )
 
+app = FastAPI(title="Neo API", version="1.0.0")
 
-TAXA_INDEX = (
-    BASE_DIR /
-    "data" /
-    "processed" /
-    "taxa_abundance.csv"
-)
+# Search responses contain thousands of sample records. Compressing responses
+# substantially reduces transfer size for both local and deployed clients.
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 
-SITES_INDEX = BASE_DIR / "data" / "processed" / "testate_amoebae_surface_sites.csv"
-PUBLICATIONS_INDEX = BASE_DIR / "data" / "processed" / "dataset_publications.csv"
-
-app = FastAPI()
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://127.0.0.1:5173,http://localhost:5173",
+    ).split(",")
+    if origin.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-print("Loading:", INDEX)
-print("Exists:", INDEX.exists())
-
-df = pd.read_csv(INDEX)
-
-if SITES_INDEX.exists():
-    publication_df = pd.read_csv(SITES_INDEX, usecols=["datasetid", "doi"])
-    publication_df = publication_df.drop_duplicates(subset=["datasetid"])
-    df = df.merge(publication_df, on="datasetid", how="left")
-
-metadata_json = BASE_DIR.parent / "scripts" / "all_testate_amoebae_surface_samples.json"
-if metadata_json.exists():
-    try:
-        metadata_records = json.loads(metadata_json.read_text())
-        investigator_rows = []
-        for response in metadata_records:
-            for item in response.get("data", []):
-                site = item.get("site", {})
-                collection_unit = site.get("collectionunit", {})
-                datasets = (
-                    collection_unit.get("datasets", site.get("datasets", []))
-                    if isinstance(collection_unit, dict)
-                    else site.get("datasets", [])
-                )
-                for dataset in datasets:
-                    names = [
-                        person.get("contactname", "").strip()
-                        for person in dataset.get("datasetpi", [])
-                        if person.get("contactname")
-                    ]
-                    investigator_rows.append({
-                        "datasetid": dataset.get("datasetid"),
-                        "investigators": "; ".join(names),
-                    })
-        if investigator_rows:
-            investigators_df = pd.DataFrame(investigator_rows).drop_duplicates("datasetid")
-            df = df.merge(investigators_df, on="datasetid", how="left")
-    except (OSError, ValueError, TypeError):
-        df["investigators"] = None
-
-if "investigators" not in df.columns:
-    df["investigators"] = None
-
-print("Loading taxa:", TAXA_INDEX)
-print("Taxa exists:", TAXA_INDEX.exists())
-
-taxa_df = pd.read_csv(TAXA_INDEX)
-
-if PUBLICATIONS_INDEX.exists():
-    dataset_publications_df = pd.read_csv(PUBLICATIONS_INDEX)
-    dataset_publications_df["datasetid"] = pd.to_numeric(
-        dataset_publications_df["datasetid"], errors="coerce"
-    ).astype("Int64")
-    dataset_publications_df["publicationid"] = pd.to_numeric(
-        dataset_publications_df["publicationid"], errors="coerce"
-    ).astype("Int64")
-else:
-    dataset_publications_df = pd.DataFrame(
-        columns=["datasetid", "publicationid", "primarypub", "citation"]
-    )
+df, taxa_df, dataset_publications_df = load_runtime_frames()
+dataset_publications_df["datasetid"] = pd.to_numeric(
+    dataset_publications_df["datasetid"], errors="coerce"
+).astype("Int64")
+dataset_publications_df["publicationid"] = pd.to_numeric(
+    dataset_publications_df["publicationid"], errors="coerce"
+).astype("Int64")
 
 taxa_df["abundance"] = pd.to_numeric(
     taxa_df["abundance"],
@@ -374,6 +326,18 @@ def limit_taxa_groups(records, limit):
 def root():
     return {"status": "running"}
 
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "data_source": "postgresql" if using_postgres() else "csv",
+        "samples": int(len(df)),
+        "taxon_observations": int(len(taxa_df)),
+        "publication_links": int(len(dataset_publications_df)),
+    }
+
+
 @app.get("/summary")
 def summary():
     return build_summary(df)
@@ -437,6 +401,8 @@ def taxa_top(limit: int = 25):
 
 @app.get("/publication-options")
 def publication_options():
+    if using_postgres():
+        return publication_options_postgres()
     if dataset_publications_df.empty:
         return []
 
@@ -502,6 +468,12 @@ def taxa_aggregate(request: TaxaAggregateRequest):
     ids = list(dict.fromkeys(request.sampleids))[:5000]
     if not ids:
         return []
+
+    if using_postgres() and request.level in {"taxon", "species", "finest"}:
+        return limit_taxa_groups(
+            taxa_aggregate_postgres(ids),
+            max(1, min(request.limit, 500)),
+        )
 
     if request.level not in {"taxon", "species", "finest"}:
         selected = taxa_df[taxa_df["sampleid"].isin(ids)]
@@ -584,6 +556,8 @@ def taxa_sample_values(request: TaxonValuesRequest):
     taxa = list(dict.fromkeys(name.strip() for name in request.taxa if name.strip()))[:20]
     if not ids or not taxa:
         return []
+    if using_postgres():
+        return taxon_sample_values_postgres(ids, taxa)
     selected = taxon_profiles_df[
         taxon_profiles_df["sampleid"].isin(ids)
         & taxon_profiles_df["lumped_taxon"].isin(taxa)
@@ -608,6 +582,12 @@ def taxa_sample_values(request: TaxonValuesRequest):
 @app.post("/export/taxa-csv")
 def export_taxa_csv(request: CalibrationRequest):
     ids = list(dict.fromkeys(request.sampleids))[:5000]
+    if using_postgres():
+        return StreamingResponse(
+            stream_taxa_csv_postgres(ids),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=neotoma_testate_amoebae_filtered_taxa.csv"},
+        )
     metadata_columns = [
         "sampleid", "datasetid", "siteid", "sitename", "collectionunit", "handle",
         "pH", "water_table_depth", "water_table_depth_units", "altitude", "doi",
@@ -664,6 +644,8 @@ class NmdsRequest(BaseModel):
 @app.post("/calibration/quality")
 def calibration_quality(request: CalibrationRequest):
     ids = list(dict.fromkeys(request.sampleids))[:5000]
+    if using_postgres():
+        return calibration_quality_postgres(ids)
     selected = df[df["sampleid"].isin(ids)].drop_duplicates("sampleid").copy()
     profiles = taxon_profiles_df[taxon_profiles_df["sampleid"].isin(ids)]
     sample_count = len(selected)
@@ -1150,6 +1132,32 @@ def search(
     site_contains: Optional[str] = None,
     publication_contains: Optional[str] = None,
 ):
+    publicationid = None
+    if publication_contains:
+        query = publication_contains.strip()
+        if query.startswith("publication:"):
+            candidate = query.removeprefix("publication:")
+            if not candidate.isdigit():
+                return []
+            publicationid = int(candidate)
+
+    if using_postgres() and (
+        not publication_contains or publicationid is not None
+    ):
+        records = search_postgres(
+            ph_min=ph_min,
+            ph_max=ph_max,
+            water_min=water_min,
+            water_max=water_max,
+            lat_min=lat_min,
+            lat_max=lat_max,
+            lon_min=lon_min,
+            lon_max=lon_max,
+            site_contains=site_contains,
+            publicationid=publicationid,
+        )
+        print(f"Returning {len(records)} rows from PostgreSQL")
+        return records
 
     result = df.copy()
 
@@ -1228,17 +1236,13 @@ def search(
         "datasetid",
         "siteid",
         "sitename",
-        "collectionunit",
-        "handle",
         "sampleid",
         "pH",
         "water_table_depth",
-        "water_table_depth_units",
         "altitude",
         "latitude",
         "longitude",
         "doi",
-        "investigators",
     ]
 
     cols = [c for c in cols if c in result.columns]

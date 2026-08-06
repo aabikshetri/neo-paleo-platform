@@ -203,7 +203,7 @@ export default function LinkedEnvironmentalExplorer({
           text: validRows.map((row) => `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}`),
           hovertemplate: "%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<extra>All samples</extra>",
           mode: "markers" as const,
-          type: "scatter" as const,
+          type: "scattergl" as const,
           name: "All samples",
           marker: { symbol: "circle", color: "#94a3b8", size: 9, opacity: 0.42 },
         }] : []),
@@ -214,7 +214,7 @@ export default function LinkedEnvironmentalExplorer({
           text: ringRows.map((row) => `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}<br>${activeGenus}: ${genusAbundance(row).toFixed(2)}%`),
           hovertemplate: "%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<extra></extra>",
           mode: "markers" as const,
-          type: "scatter" as const,
+          type: "scattergl" as const,
           name: activeGenus,
           marker: {
             symbol: "circle-open",
@@ -235,7 +235,7 @@ export default function LinkedEnvironmentalExplorer({
         }),
         hovertemplate: "%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<extra></extra>",
         mode: "markers" as const,
-        type: "scatter" as const,
+        type: "scattergl" as const,
         name: group,
         marker: {
           symbol: "circle-open",

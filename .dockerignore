@@ -1,0 +1,11 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+frontend
+scripts
+Result
+backend/data
+*.csv
+*.png
+.env

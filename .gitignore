@@ -18,3 +18,4 @@ backend/data/processed/search_results.csv
 backend/data/processed/failed_downloads.csv
 backend/data/processed/*.png
 backend/data/processed/*partial*.csv
+scripts/all_testate_amoebae_surface_samples.json

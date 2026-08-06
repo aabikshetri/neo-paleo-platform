@@ -121,19 +121,30 @@ export type NmdsResult = {
 
 const profileRequests = new Map<string, Promise<TaxaSampleProfile[]>>();
 const taxonValueRequests = new Map<string, Promise<TaxonSampleValue[]>>();
+const aggregateRequests = new Map<string, Promise<any[]>>();
+const qualityRequests = new Map<string, Promise<CalibrationQuality>>();
 
 export async function getTaxaBySamples(
   sampleids: number[],
   level = "taxon",
   limit = 500
 ) {
-  const response = await axios.post(`${API}/taxa/aggregate`, {
-    sampleids,
+  const ids = Array.from(new Set(sampleids)).sort((a, b) => a - b);
+  const key = `${level}:${limit}:${ids.join(",")}`;
+  const existing = aggregateRequests.get(key);
+  if (existing) return existing;
+
+  if (aggregateRequests.size >= 20) aggregateRequests.clear();
+  const request = axios.post(`${API}/taxa/aggregate`, {
+    sampleids: ids,
     level,
     limit,
+  }).then((response) => response.data).catch((error) => {
+    aggregateRequests.delete(key);
+    throw error;
   });
-
-  return response.data;
+  aggregateRequests.set(key, request);
+  return request;
 }
 
 export async function getTaxaCompositionBySample(
@@ -222,8 +233,20 @@ export async function downloadFilteredTaxaCsv(sampleids: number[]) {
 export async function getCalibrationQuality(
   sampleids: number[]
 ): Promise<CalibrationQuality> {
-  const response = await axios.post(`${API}/calibration/quality`, { sampleids });
-  return response.data;
+  const ids = Array.from(new Set(sampleids)).sort((a, b) => a - b);
+  const key = ids.join(",");
+  const existing = qualityRequests.get(key);
+  if (existing) return existing;
+
+  if (qualityRequests.size >= 20) qualityRequests.clear();
+  const request = axios.post(`${API}/calibration/quality`, { sampleids: ids })
+    .then((response) => response.data)
+    .catch((error) => {
+      qualityRequests.delete(key);
+      throw error;
+    });
+  qualityRequests.set(key, request);
+  return request;
 }
 
 export async function findModernAnalogues(

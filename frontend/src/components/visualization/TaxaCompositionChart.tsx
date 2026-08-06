@@ -50,13 +50,17 @@ export default function TaxaCompositionChart(props: Props) {
     const activeTaxa = selectedTaxa.filter((taxon) => taxa.includes(taxon));
     return activeTaxa.length ? activeTaxa : taxa.slice(0, 1);
   }, [selectedTaxa, taxa]);
+  const sampleRows = useMemo(
+    () => rows.filter((row) => row.sampleid != null),
+    [rows]
+  );
   const validRows = useMemo(
     () => rows.filter((row) => row.sampleid != null && row.pH != null && row.water_table_depth != null),
     [rows]
   );
   const ids = useMemo(
-    () => validRows.flatMap((row) => row.sampleid == null ? [] : [row.sampleid]),
-    [validRows]
+    () => sampleRows.flatMap((row) => row.sampleid == null ? [] : [row.sampleid]),
+    [sampleRows]
   );
   const requestKey = `${ids.join(",")}|${displayedTaxa.join("|")}`;
 
@@ -87,13 +91,15 @@ export default function TaxaCompositionChart(props: Props) {
   const combinedMean = displayedTaxa.reduce((sum, taxon) =>
     sum + (chartData.find((row) => row.taxon === taxon)?.percentage ?? 0), 0);
   const selectedLabel = displayedTaxa.join(" + ");
-  const responseRows = validRows.map((row) => ({
-    environmental: Number(row[responseVariable]),
-    abundance: aggregation === "combined"
-      ? combinedFor(row)
-      : displayedTaxa.reduce((sum, taxon) => sum + percentageFor(row, taxon), 0),
-    row,
-  })).filter((item) => Number.isFinite(item.environmental));
+  const responseRows = sampleRows
+    .filter((row) => row[responseVariable] != null && Number.isFinite(Number(row[responseVariable])))
+    .map((row) => ({
+      environmental: Number(row[responseVariable]),
+      abundance: aggregation === "combined"
+        ? combinedFor(row)
+        : displayedTaxa.reduce((sum, taxon) => sum + percentageFor(row, taxon), 0),
+      row,
+    }));
   const responseWeight = responseRows.reduce((sum, item) => sum + item.abundance, 0);
   const optimum = responseWeight > 0
     ? responseRows.reduce((sum, item) => sum + item.environmental * item.abundance, 0) / responseWeight
@@ -115,7 +121,7 @@ export default function TaxaCompositionChart(props: Props) {
     text: validRows.map((row) => `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}`),
     hovertemplate: "%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<extra>Filtered sample</extra>",
     mode: "markers" as const,
-    type: "scatter" as const,
+    type: "scattergl" as const,
     name: "All filtered samples",
     marker: { symbol: "circle", size: 9, color: "#94a3b8", opacity: 0.42 },
   };
@@ -137,7 +143,7 @@ export default function TaxaCompositionChart(props: Props) {
     text: combinedRows.map((row) => `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}<br>${selectedLabel}: ${combinedFor(row).toFixed(2)}%`),
     hovertemplate: "%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<extra>Combined selection</extra>",
     mode: "markers" as const,
-    type: "scatter" as const,
+    type: "scattergl" as const,
     name: `Combined (${displayedTaxa.length})`,
     marker: { symbol: "circle-open", size: combinedRows.map((row) => ringSize(combinedFor(row))), color: taxonColor(displayedTaxa[0]), opacity: 0.9, line: { width: 2 } },
   };
@@ -162,7 +168,7 @@ export default function TaxaCompositionChart(props: Props) {
       text: taxonRows.map((row) => `${row.sitename || "Unknown site"}<br>Sample ${row.sampleid}<br>${taxon}: ${percentageFor(row, taxon).toFixed(2)}%`),
       hovertemplate: "%{text}<br>WTD %{x:.2f}<br>pH %{y:.2f}<extra></extra>",
       mode: "markers" as const,
-      type: "scatter" as const,
+      type: "scattergl" as const,
       name: taxon,
       marker: { symbol: "circle-open", size: taxonRows.map((row) => ringSize(percentageFor(row, taxon))), color: taxonColor(taxon), opacity: 0.88, line: { width: 2 } },
     };
@@ -244,7 +250,7 @@ export default function TaxaCompositionChart(props: Props) {
               Combined abundance of {selectedLabel} along the selected environmental gradient.
             </p>
             <p style={{ opacity: 0.72 }}>
-              Weighted-average optimum: {optimum == null ? "not available" : optimum.toFixed(2)}.
+              {responseRows.length.toLocaleString()} filtered samples have a recorded {responseVariable === "pH" ? "pH" : "water-table depth"} value. Weighted-average optimum: {optimum == null ? "not available" : optimum.toFixed(2)}.
             </p>
           </div>
           <label>
@@ -264,7 +270,7 @@ export default function TaxaCompositionChart(props: Props) {
                 text: responseRows.map((item) => `${item.row.sitename || "Unknown site"}<br>Sample ${item.row.sampleid}`),
                 hovertemplate: "%{text}<br>x %{x:.2f}<br>abundance %{y:.2f}%<extra></extra>",
                 mode: "markers",
-                type: "scatter",
+                type: "scattergl",
                 name: selectedLabel,
                 marker: { color: taxonColor(displayedTaxa[0]), opacity: 0.75, size: 8 },
               },
@@ -272,7 +278,7 @@ export default function TaxaCompositionChart(props: Props) {
                 x: [optimum, optimum],
                 y: [0, Math.max(...responseRows.map((item) => item.abundance), 1)],
                 mode: "lines" as const,
-                type: "scatter" as const,
+                type: "scattergl" as const,
                 name: "Weighted optimum",
                 line: { color: taxonColor(displayedTaxa[0]), dash: "dash", width: 2 },
                 hovertemplate: `Weighted optimum: ${optimum.toFixed(2)}<extra></extra>`,
@@ -281,7 +287,14 @@ export default function TaxaCompositionChart(props: Props) {
             layout={{
               autosize: true,
               height: 360,
-              margin: { l: 62, r: 20, t: 20, b: 58 },
+              margin: { l: 62, r: 20, t: 20, b: 105 },
+              legend: {
+                orientation: "h",
+                x: 0.5,
+                xanchor: "center",
+                y: -0.28,
+                yanchor: "top",
+              },
               xaxis: { title: { text: responseVariable === "pH" ? "pH" : "Water-table depth" } },
               yaxis: { title: { text: "Combined abundance (%)" }, rangemode: "tozero" },
               paper_bgcolor: "transparent",

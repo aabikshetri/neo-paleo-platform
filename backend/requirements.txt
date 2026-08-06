@@ -4,3 +4,4 @@ pandas
 numpy
 scipy
 scikit-learn
+psycopg[binary,pool]

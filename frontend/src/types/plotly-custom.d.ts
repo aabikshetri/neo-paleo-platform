@@ -10,6 +10,11 @@ declare module "plotly.js/lib/scatter" {
   export default scatter;
 }
 
+declare module "plotly.js/lib/scattergl" {
+  const scattergl: unknown;
+  export default scattergl;
+}
+
 declare module "plotly.js/lib/scatter3d" {
   const scatter3d: unknown;
   export default scatter3d;

@@ -3,6 +3,9 @@ import axios from "axios";
 const API =
   import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
+const searchRequests = new Map<string, Promise<any[]>>();
+let publicationRequest: Promise<any[]> | null = null;
+
 export async function searchDatasets(params = {}) {
   const cleanParams = Object.fromEntries(
     Object.entries(params).filter(
@@ -13,14 +16,30 @@ export async function searchDatasets(params = {}) {
     )
   );
 
-  const response = await axios.get(`${API}/search`, {
-    params: cleanParams,
-  });
+  const key = new URLSearchParams(
+    Object.entries(cleanParams).map(([name, value]) => [name, String(value)])
+  ).toString();
+  const existing = searchRequests.get(key);
+  if (existing) return existing;
 
-  return response.data;
+  if (searchRequests.size >= 20) searchRequests.clear();
+  const request = axios.get(`${API}/search`, { params: cleanParams })
+    .then((response) => response.data)
+    .catch((error) => {
+      searchRequests.delete(key);
+      throw error;
+    });
+  searchRequests.set(key, request);
+  return request;
 }
 
 export async function getPublicationOptions() {
-  const response = await axios.get(`${API}/publication-options`);
-  return response.data;
+  if (publicationRequest) return publicationRequest;
+  publicationRequest = axios.get(`${API}/publication-options`)
+    .then((response) => response.data)
+    .catch((error) => {
+      publicationRequest = null;
+      throw error;
+    });
+  return publicationRequest;
 }

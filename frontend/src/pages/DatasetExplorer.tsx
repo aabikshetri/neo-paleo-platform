@@ -21,6 +21,7 @@ type AnalysisGroupProps = {
   description: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
+  onOpenChange?: (isOpen: boolean) => void;
 };
 
 function AnalysisGroup({
@@ -28,6 +29,7 @@ function AnalysisGroup({
   description,
   children,
   defaultOpen = false,
+  onOpenChange,
 }: AnalysisGroupProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
@@ -35,7 +37,11 @@ function AnalysisGroup({
     <details
       className="analysis-group"
       open={isOpen}
-      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        const open = event.currentTarget.open;
+        setIsOpen(open);
+        onOpenChange?.(open);
+      }}
     >
       <summary>
         <span>
@@ -56,8 +62,8 @@ export default function DatasetExplorer() {
   const [bbox, setBbox] = useState<any>(null);
   const [selectedSite, setSelectedSite] = useState<any>(null);
   const [taxaRows, setTaxaRows] = useState<any[]>([]);
-  const [allTaxaRows, setAllTaxaRows] = useState<any[]>([]);
   const [taxaLoading, setTaxaLoading] = useState(false);
+  const [explorationOpen, setExplorationOpen] = useState(false);
   const [analogueSnapshot, setAnalogueSnapshot] = useState<Record<string, unknown> | null>(null);
   const [nmdsSnapshot, setNmdsSnapshot] = useState<Record<string, unknown> | null>(null);
 
@@ -78,7 +84,7 @@ export default function DatasetExplorer() {
     loadData();
   }, []);
 
-  async function loadTaxaForSelectedRows(rowsForTaxa: any[], saveAsBaseline = false) {
+  async function loadTaxaForSelectedRows(rowsForTaxa: any[]) {
     const sampleids = rowsForTaxa
       .map((row) => row.sampleid)
       .filter(Boolean);
@@ -98,7 +104,6 @@ export default function DatasetExplorer() {
       );
 
       setTaxaRows(data);
-      if (saveAsBaseline) setAllTaxaRows(data);
     } catch (err) {
       console.error(err);
       setTaxaRows([]);
@@ -114,7 +119,6 @@ export default function DatasetExplorer() {
     setAllRows(data);
     setSelectedRows(data);
 
-    await loadTaxaForSelectedRows(data, true);
   }
 
   async function handleSearch() {
@@ -125,7 +129,7 @@ export default function DatasetExplorer() {
     setSelectedSite(null);
     setBbox(null);
 
-    await loadTaxaForSelectedRows(data);
+    if (explorationOpen) await loadTaxaForSelectedRows(data);
   }
 
   async function clearFilters() {
@@ -146,7 +150,7 @@ export default function DatasetExplorer() {
     setSelectedRows(allRows);
     setSelectedSite(null);
     setBbox(null);
-    await loadTaxaForSelectedRows(allRows);
+    if (explorationOpen) await loadTaxaForSelectedRows(allRows);
   }
 
   function selectRegion(bounds: any) {
@@ -169,13 +173,13 @@ export default function DatasetExplorer() {
     });
 
     setSelectedRows(filtered);
-    loadTaxaForSelectedRows(filtered);
+    if (explorationOpen) loadTaxaForSelectedRows(filtered);
   }
 
   function clearRegion() {
     setSelectedRows(rows);
     setBbox(null);
-    loadTaxaForSelectedRows(rows);
+    if (explorationOpen) loadTaxaForSelectedRows(rows);
   }
 
   return (
@@ -195,11 +199,27 @@ export default function DatasetExplorer() {
         downloadControl={<DownloadCSV rows={selectedRows} />}
       />
 
+      <AnalysisGroup
+        title="Summary statistics of filtered dataset"
+        description=""
+        defaultOpen
+      >
+        <div className="analysis-panel">
+          <CalibrationQualityPanel rows={selectedRows} />
+        </div>
+      </AnalysisGroup>
+
       <SummaryCards rows={selectedRows} />
 
       <AnalysisGroup
         title="Exploratory visualization"
         description="Inspect community composition, environmental gradients, and geography."
+        onOpenChange={(open) => {
+          setExplorationOpen(open);
+          if (open && taxaRows.length === 0 && !taxaLoading) {
+            loadTaxaForSelectedRows(selectedRows);
+          }
+        }}
       >
       {bbox && (
         <div
@@ -292,22 +312,11 @@ export default function DatasetExplorer() {
         ) : (
           <TaxaCompositionChart
             data={taxaRows}
-            referenceData={allTaxaRows}
             rows={selectedRows}
             referenceRows={allRows}
           />
         )}
       </div>
-      </AnalysisGroup>
-
-      <AnalysisGroup
-        title="Summary statistics of filtered dataset"
-        description=""
-        defaultOpen
-      >
-        <div className="analysis-panel">
-          <CalibrationQualityPanel rows={selectedRows} />
-        </div>
       </AnalysisGroup>
 
       <AnalysisGroup
