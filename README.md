@@ -19,6 +19,11 @@ This guide runs the complete application locally with PostgreSQL. PostgreSQL,
 the FastAPI backend, and the React frontend are separate services. Complete
 steps 1–5 once, then use three terminal windows for steps 6–8.
 
+Use the instructions for your operating system:
+
+- **macOS/Linux:** use Terminal.
+- **Windows:** use PowerShell, not Command Prompt.
+
 ### 1. Install and check the prerequisites
 
 Install:
@@ -28,12 +33,25 @@ Install:
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - npm (installed with [Node.js](https://nodejs.org/))
 
-Confirm the command-line tools are available:
+Confirm the command-line tools are available.
+
+**macOS/Linux:**
 
 ```bash
 git --version
 python3 --version
 docker --version
+node --version
+npm --version
+```
+
+**Windows PowerShell:**
+
+```powershell
+git --version
+py --version
+docker --version
+node --version
 npm --version
 ```
 
@@ -43,12 +61,22 @@ used if the computer has internet access.
 
 ### 2. Clone the project from GitHub
 
-The following commands place the project in the current user's home directory:
+These commands place the project in the current user's home directory.
+
+**macOS/Linux:**
 
 ```bash
 cd ~
 git clone https://github.com/aabikshetri/neo-paleo-platform.git
 cd neo-paleo-platform
+```
+
+**Windows PowerShell:**
+
+```powershell
+Set-Location $HOME
+git clone https://github.com/aabikshetri/neo-paleo-platform.git
+Set-Location neo-paleo-platform
 ```
 
 Confirm that Git cloned the correct repository:
@@ -61,8 +89,17 @@ git status
 The remote should contain `aabikshetri/neo-paleo-platform`, and the working tree
 should initially be clean. If the project was already cloned, update it with:
 
+**macOS/Linux:**
+
 ```bash
 cd ~/neo-paleo-platform
+git pull --ff-only origin main
+```
+
+**Windows PowerShell:**
+
+```powershell
+Set-Location "$HOME\neo-paleo-platform"
 git pull --ff-only origin main
 ```
 
@@ -72,11 +109,24 @@ another directory is shown.
 Before installing anything, verify that the processed runtime datasets were
 included in the clone:
 
+**macOS/Linux:**
+
 ```bash
 ls backend/data/processed/testate_search_index.csv \
    backend/data/processed/taxa_abundance.csv \
    backend/data/processed/testate_amoebae_surface_sites.csv \
    backend/data/processed/dataset_publications.csv
+```
+
+**Windows PowerShell:**
+
+```powershell
+Get-Item @(
+    "backend\data\processed\testate_search_index.csv"
+    "backend\data\processed\taxa_abundance.csv"
+    "backend\data\processed\testate_amoebae_surface_sites.csv"
+    "backend\data\processed\dataset_publications.csv"
+)
 ```
 
 All four files are tracked in this repository and are required by the initial
@@ -85,6 +135,8 @@ PostgreSQL import. If any are missing, confirm that the clone completed and run
 
 ### 3. Create the Python environment
 
+**macOS/Linux:**
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
@@ -92,13 +144,40 @@ python -m pip install --upgrade pip
 python -m pip install -r backend/requirements.txt
 ```
 
+**Windows PowerShell:**
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r backend\requirements.txt
+```
+
+If PowerShell reports that script execution is disabled, run this once and then
+activate the environment again:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\.venv\Scripts\Activate.ps1
+```
+
 On future runs, do not recreate the environment. Activate it with:
+
+**macOS/Linux:**
 
 ```bash
 source .venv/bin/activate
 ```
 
+**Windows PowerShell:**
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
 ### 4. Install the frontend dependencies
+
+The npm commands are the same in Terminal and PowerShell:
 
 ```bash
 cd frontend
@@ -131,8 +210,11 @@ Start Docker Desktop. On macOS it can be opened from Finder, or with:
 open -a Docker
 ```
 
+On Windows, open **Docker Desktop** from the Start menu and leave it in its
+default Linux containers mode.
+
 Wait until Docker Desktop reports that its engine is running, then start the
-database:
+database. These commands are the same on both platforms:
 
 ```bash
 docker compose up -d postgres
@@ -142,11 +224,21 @@ docker compose ps
 The `postgres` service should display `Up` and eventually `healthy`. Import the
 processed Neotoma-derived runtime data:
 
+**macOS/Linux:**
+
 ```bash
 source .venv/bin/activate
 
 DATABASE_URL=postgresql://neo:neo-development@127.0.0.1:5433/neo \
 python scripts/import_runtime_data.py
+```
+
+**Windows PowerShell:**
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+$env:DATABASE_URL = "postgresql://neo:neo-development@127.0.0.1:5433/neo"
+python scripts\import_runtime_data.py
 ```
 
 A successful first import reports approximately:
@@ -166,8 +258,17 @@ processed source data or database schema changes.
 
 PostgreSQL is already running after step 5. On later sessions, start it with:
 
+**macOS/Linux:**
+
 ```bash
 cd ~/neo-paleo-platform
+docker compose up -d postgres
+```
+
+**Windows PowerShell:**
+
+```powershell
+Set-Location "$HOME\neo-paleo-platform"
 docker compose up -d postgres
 ```
 
@@ -177,6 +278,8 @@ remain busy.
 ### 7. Terminal 2: start the backend
 
 Open a new terminal:
+
+**macOS/Linux:**
 
 ```bash
 cd ~/neo-paleo-platform
@@ -189,11 +292,28 @@ python -m uvicorn backend.api:app \
   --reload
 ```
 
+**Windows PowerShell:**
+
+```powershell
+Set-Location "$HOME\neo-paleo-platform"
+.\.venv\Scripts\Activate.ps1
+$env:DATABASE_URL = "postgresql://neo:neo-development@127.0.0.1:5433/neo"
+python -m uvicorn backend.api:app --host 127.0.0.1 --port 8001 --reload
+```
+
 Keep this terminal open. The backend is ready when it says `Application startup
 complete`. In another terminal, verify it:
 
+**macOS/Linux:**
+
 ```bash
 curl http://127.0.0.1:8001/health
+```
+
+**Windows PowerShell:**
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8001/health
 ```
 
 The response must contain `"data_source":"postgresql"`. If it says `csv`, stop
@@ -204,10 +324,20 @@ including `DATABASE_URL=...`.
 
 Open another terminal:
 
+**macOS/Linux:**
+
 ```bash
 cd ~/neo-paleo-platform/frontend
 
 VITE_API_URL=http://127.0.0.1:8001 \
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+**Windows PowerShell:**
+
+```powershell
+Set-Location "$HOME\neo-paleo-platform\frontend"
+$env:VITE_API_URL = "http://127.0.0.1:8001"
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
@@ -244,8 +374,17 @@ After opening the website:
 The development server is sufficient for local use. Before deployment, verify
 that the optimized frontend builds successfully:
 
+**macOS/Linux:**
+
 ```bash
 cd ~/neo-paleo-platform/frontend
+npm run build
+```
+
+**Windows PowerShell:**
+
+```powershell
+Set-Location "$HOME\neo-paleo-platform\frontend"
 npm run build
 ```
 
@@ -257,8 +396,17 @@ frontend does not deploy the backend or PostgreSQL database.
 Press `Ctrl+C` in the frontend terminal, then in the backend terminal. Stop
 PostgreSQL without deleting the imported data:
 
+**macOS/Linux:**
+
 ```bash
 cd ~/neo-paleo-platform
+docker compose stop postgres
+```
+
+**Windows PowerShell:**
+
+```powershell
+Set-Location "$HOME\neo-paleo-platform"
 docker compose stop postgres
 ```
 
@@ -267,7 +415,9 @@ PostgreSQL volume and perform the import again.
 
 ### Normal startup after the first installation
 
-You only need these three commands on later runs:
+You only need the following commands on later runs.
+
+#### macOS/Linux
 
 ```bash
 # Terminal 1 — PostgreSQL
@@ -287,6 +437,29 @@ python -m uvicorn backend.api:app --host 127.0.0.1 --port 8001 --reload
 # Terminal 3 — frontend
 cd ~/neo-paleo-platform/frontend
 VITE_API_URL=http://127.0.0.1:8001 \
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+#### Windows PowerShell
+
+```powershell
+# Terminal 1 — PostgreSQL
+Set-Location "$HOME\neo-paleo-platform"
+docker compose up -d postgres
+```
+
+```powershell
+# Terminal 2 — backend
+Set-Location "$HOME\neo-paleo-platform"
+.\.venv\Scripts\Activate.ps1
+$env:DATABASE_URL = "postgresql://neo:neo-development@127.0.0.1:5433/neo"
+python -m uvicorn backend.api:app --host 127.0.0.1 --port 8001 --reload
+```
+
+```powershell
+# Terminal 3 — frontend
+Set-Location "$HOME\neo-paleo-platform\frontend"
+$env:VITE_API_URL = "http://127.0.0.1:8001"
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
@@ -474,7 +647,7 @@ relationships and full citations. The cached index can be refreshed from the
 live Neotoma database with:
 
 ```bash
-cd /Users/aabiskar/Desktop/Neo
+cd ~/neo-paleo-platform
 source .venv/bin/activate
 python scripts/build_publication_index.py
 ```
@@ -510,6 +683,14 @@ publicly reachable backend API. `VITE_API_URL` must point to that deployed
 backend during the production build; `127.0.0.1` works only for local
 development.
 
+## Detailed macOS/Linux reference
+
+The sections below provide additional macOS/Linux command-line detail and
+architecture notes. Windows users should use the PowerShell commands in
+**First-time setup: start here** and **Normal startup after the first
+installation** above; do not substitute `source` or inline `NAME=value`
+commands into PowerShell.
+
 ## Prerequisites
 
 - Python 3.9 or newer
@@ -525,7 +706,7 @@ version is first on your `PATH`.
 From the repository root:
 
 ```bash
-cd /Users/aabiskar/Desktop/Neo
+cd ~/neo-paleo-platform
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -535,14 +716,14 @@ python -m pip install -r backend/requirements.txt
 If `.venv` already exists, only activate it:
 
 ```bash
-cd /Users/aabiskar/Desktop/Neo
+cd ~/neo-paleo-platform
 source .venv/bin/activate
 ```
 
 ## First-time frontend setup
 
 ```bash
-cd /Users/aabiskar/Desktop/Neo/frontend
+cd ~/neo-paleo-platform/frontend
 npm install
 ```
 
@@ -554,7 +735,7 @@ installation using the default port `5432`.
 Start Docker Desktop, then run:
 
 ```bash
-cd /Users/aabiskar/Desktop/Neo
+cd ~/neo-paleo-platform
 docker compose up -d postgres
 ```
 
@@ -645,7 +826,7 @@ the backend and frontend terminals must remain open.
 Make sure Docker Desktop is running, then start the database container:
 
 ```bash
-cd /Users/aabiskar/Desktop/Neo
+cd ~/neo-paleo-platform
 docker compose up -d postgres
 docker compose ps
 ```
@@ -657,7 +838,7 @@ You only need to import the processed data the first time you create the
 database, or after the processed source files change. To perform that import:
 
 ```bash
-cd /Users/aabiskar/Desktop/Neo
+cd ~/neo-paleo-platform
 source .venv/bin/activate
 
 export DATABASE_URL=postgresql://neo:neo-development@127.0.0.1:5433/neo
@@ -670,7 +851,7 @@ preserves the imported database between normal container stops and restarts.
 ### Terminal 2: start the backend
 
 ```bash
-cd /Users/aabiskar/Desktop/Neo
+cd ~/neo-paleo-platform
 source .venv/bin/activate
 
 DATABASE_URL=postgresql://neo:neo-development@127.0.0.1:5433/neo \
@@ -720,7 +901,7 @@ unset DATABASE_URL
 ### Terminal 3: start the frontend
 
 ```bash
-cd /Users/aabiskar/Desktop/Neo/frontend
+cd ~/neo-paleo-platform/frontend
 
 VITE_API_URL=http://127.0.0.1:8001 \
 npm run dev -- --host 127.0.0.1 --port 5173
@@ -739,13 +920,13 @@ After the initial database import, the complete repeat-start sequence is:
 
 ```bash
 # Terminal 1
-cd /Users/aabiskar/Desktop/Neo
+cd ~/neo-paleo-platform
 docker compose up -d postgres
 ```
 
 ```bash
 # Terminal 2
-cd /Users/aabiskar/Desktop/Neo
+cd ~/neo-paleo-platform
 source .venv/bin/activate
 DATABASE_URL=postgresql://neo:neo-development@127.0.0.1:5433/neo \
 python -m uvicorn backend.api:app --host 127.0.0.1 --port 8001 --reload
@@ -753,7 +934,7 @@ python -m uvicorn backend.api:app --host 127.0.0.1 --port 8001 --reload
 
 ```bash
 # Terminal 3
-cd /Users/aabiskar/Desktop/Neo/frontend
+cd ~/neo-paleo-platform/frontend
 VITE_API_URL=http://127.0.0.1:8001 \
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
@@ -840,7 +1021,14 @@ move into SQL incrementally.
 3. Stop PostgreSQL without deleting its imported data:
 
 ```bash
-cd /Users/aabiskar/Desktop/Neo
+cd ~/neo-paleo-platform
+docker compose stop postgres
+```
+
+Windows PowerShell:
+
+```powershell
+Set-Location "$HOME\neo-paleo-platform"
 docker compose stop postgres
 ```
 
@@ -868,9 +1056,18 @@ npx --yes --package=node@22 node --version
 
 Inspect the relevant port:
 
+macOS/Linux:
+
 ```bash
 lsof -nP -iTCP:8001 -sTCP:LISTEN
 lsof -nP -iTCP:5173 -sTCP:LISTEN
+```
+
+Windows PowerShell:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8001 -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue
 ```
 
 Stop the existing process or choose another port. If the backend port changes,
@@ -878,19 +1075,34 @@ use the same new address in `VITE_API_URL`.
 
 ### Backend dependencies are missing
 
+macOS/Linux:
+
 ```bash
-cd /Users/aabiskar/Desktop/Neo
+cd ~/neo-paleo-platform
 source .venv/bin/activate
 python -m pip install -r backend/requirements.txt
 ```
 
+Windows PowerShell:
+
+```powershell
+Set-Location "$HOME\neo-paleo-platform"
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r backend\requirements.txt
+```
+
 ### Frontend optional dependencies are missing
 
+macOS/Linux:
+
 ```bash
-cd /Users/aabiskar/Desktop/Neo/frontend
+cd ~/neo-paleo-platform/frontend
 npm install --include=optional
 ```
 
-```bash
-curl http://127.0.0.1:8001/health
+Windows PowerShell:
+
+```powershell
+Set-Location "$HOME\neo-paleo-platform\frontend"
+npm install --include=optional
 ```
