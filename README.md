@@ -41,30 +41,47 @@ The frontend requires Node 20.19+ or 22.12+. The project npm scripts request a
 temporary Node 22 runtime automatically, so an older system Node can still be
 used if the computer has internet access.
 
-### 2. Open the project directory
+### 2. Clone the project from GitHub
 
-If the project has already been downloaded:
+The following commands place the project in the current user's home directory:
 
 ```bash
-cd /path/to/Neo
+cd ~
+git clone https://github.com/aabikshetri/neo-paleo-platform.git
+cd neo-paleo-platform
 ```
 
-For the current macOS development location, that command is:
+Confirm that Git cloned the correct repository:
 
 ```bash
-cd /Users/aabiskar/Desktop/Neo
+git remote -v
+git status
 ```
 
-If starting from GitHub, clone the repository first and replace
-`REPOSITORY_URL` with its GitHub URL:
+The remote should contain `aabikshetri/neo-paleo-platform`, and the working tree
+should initially be clean. If the project was already cloned, update it with:
 
 ```bash
-git clone REPOSITORY_URL Neo
-cd Neo
+cd ~/neo-paleo-platform
+git pull --ff-only origin main
 ```
 
 All backend and Docker commands below are run from this repository root unless
 another directory is shown.
+
+Before installing anything, verify that the processed runtime datasets were
+included in the clone:
+
+```bash
+ls backend/data/processed/testate_search_index.csv \
+   backend/data/processed/taxa_abundance.csv \
+   backend/data/processed/testate_amoebae_surface_sites.csv \
+   backend/data/processed/dataset_publications.csv
+```
+
+All four files are tracked in this repository and are required by the initial
+PostgreSQL import. If any are missing, confirm that the clone completed and run
+`git pull --ff-only origin main` before continuing.
 
 ### 3. Create the Python environment
 
@@ -91,6 +108,20 @@ cd ..
 
 This only needs to be repeated when `frontend/package.json` or the lockfile
 changes.
+
+Build the frontend once to verify that Node, TypeScript, Vite, and all frontend
+dependencies work on the new device:
+
+```bash
+cd frontend
+npm run build
+cd ..
+```
+
+A successful build creates `frontend/dist/`. That directory is generated and
+does not need to be committed. If Vite reports an unsupported Node version,
+confirm that the device has internet access; the project script obtains a
+compatible Node 22 runtime automatically.
 
 ### 5. Create and populate PostgreSQL
 
@@ -136,7 +167,7 @@ processed source data or database schema changes.
 PostgreSQL is already running after step 5. On later sessions, start it with:
 
 ```bash
-cd /path/to/Neo
+cd ~/neo-paleo-platform
 docker compose up -d postgres
 ```
 
@@ -148,7 +179,7 @@ remain busy.
 Open a new terminal:
 
 ```bash
-cd /path/to/Neo
+cd ~/neo-paleo-platform
 source .venv/bin/activate
 
 DATABASE_URL=postgresql://neo:neo-development@127.0.0.1:5433/neo \
@@ -174,7 +205,7 @@ including `DATABASE_URL=...`.
 Open another terminal:
 
 ```bash
-cd /path/to/Neo/frontend
+cd ~/neo-paleo-platform/frontend
 
 VITE_API_URL=http://127.0.0.1:8001 \
 npm run dev -- --host 127.0.0.1 --port 5173
@@ -214,7 +245,7 @@ The development server is sufficient for local use. Before deployment, verify
 that the optimized frontend builds successfully:
 
 ```bash
-cd /path/to/Neo/frontend
+cd ~/neo-paleo-platform/frontend
 npm run build
 ```
 
@@ -227,7 +258,7 @@ Press `Ctrl+C` in the frontend terminal, then in the backend terminal. Stop
 PostgreSQL without deleting the imported data:
 
 ```bash
-cd /path/to/Neo
+cd ~/neo-paleo-platform
 docker compose stop postgres
 ```
 
@@ -240,13 +271,13 @@ You only need these three commands on later runs:
 
 ```bash
 # Terminal 1 — PostgreSQL
-cd /path/to/Neo
+cd ~/neo-paleo-platform
 docker compose up -d postgres
 ```
 
 ```bash
 # Terminal 2 — backend
-cd /path/to/Neo
+cd ~/neo-paleo-platform
 source .venv/bin/activate
 DATABASE_URL=postgresql://neo:neo-development@127.0.0.1:5433/neo \
 python -m uvicorn backend.api:app --host 127.0.0.1 --port 8001 --reload
@@ -254,7 +285,7 @@ python -m uvicorn backend.api:app --host 127.0.0.1 --port 8001 --reload
 
 ```bash
 # Terminal 3 — frontend
-cd /path/to/Neo/frontend
+cd ~/neo-paleo-platform/frontend
 VITE_API_URL=http://127.0.0.1:8001 \
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
