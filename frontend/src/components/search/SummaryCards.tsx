@@ -1,28 +1,47 @@
-// src/components/search/SummaryCards.tsx
+import { memo, useMemo } from "react";
+import type { SearchSummary } from "../../api/search";
 
 type Props = {
     rows: any[];
+    summary?: SearchSummary | null;
   };
   
-  export default function SummaryCards({ rows }: Props) {
-    const samples = rows.length;
-  
-    const sites = new Set(
-      rows.map((r) => r.siteid)
-    ).size;
-  
-    const meanOfValid = (field: "pH" | "water_table_depth") => {
-      const values = rows
-        .flatMap((row) => row[field] == null ? [] : [Number(row[field])])
-        .filter((value) => Number.isFinite(value));
+  function SummaryCards({ rows, summary }: Props) {
+    const samples = summary?.samples ?? rows.length;
+    const calculated = useMemo(() => {
+      const siteIds = new Set<unknown>();
+      let phSum = 0;
+      let phCount = 0;
+      let waterSum = 0;
+      let waterCount = 0;
 
-      return values.length > 0
-        ? (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2)
-        : "—";
-    };
+      for (const row of rows) {
+        siteIds.add(row.siteid);
+        const ph = Number(row.pH);
+        if (row.pH != null && Number.isFinite(ph)) {
+          phSum += ph;
+          phCount += 1;
+        }
+        const water = Number(row.water_table_depth);
+        if (row.water_table_depth != null && Number.isFinite(water)) {
+          waterSum += water;
+          waterCount += 1;
+        }
+      }
 
-    const meanPH = meanOfValid("pH");
-    const meanWT = meanOfValid("water_table_depth");
+      return {
+        sites: siteIds.size,
+        meanPH: phCount ? (phSum / phCount).toFixed(2) : "—",
+        meanWT: waterCount ? (waterSum / waterCount).toFixed(2) : "—",
+      };
+    }, [rows]);
+    const sites = summary?.sites ?? calculated.sites;
+    const meanPH = summary?.mean_pH == null
+      ? (summary ? "—" : calculated.meanPH)
+      : summary.mean_pH.toFixed(2);
+    const meanWT = summary?.mean_water_table_depth == null
+      ? (summary ? "—" : calculated.meanWT)
+      : summary.mean_water_table_depth.toFixed(2);
   
     const cardStyle = {
       border: "1px solid #444",
@@ -63,3 +82,5 @@ type Props = {
       </div>
     );
   }
+
+  export default memo(SummaryCards);

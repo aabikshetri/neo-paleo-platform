@@ -82,9 +82,11 @@ function formatNumber(value?: number | null, digits = 2) {
 export default function LinkedEnvironmentalExplorer({
   rows,
   onSampleSelect,
+  selectionToken,
 }: {
   rows: SampleRow[];
   onSampleSelect?: (row: SampleRow) => void;
+  selectionToken?: string | null;
 }) {
   const [result, setResult] = useState<{ key: string; data: SampleProfile[] }>({
     key: "",
@@ -114,13 +116,13 @@ export default function LinkedEnvironmentalExplorer({
     () => validRows.flatMap((row) => row.sampleid == null ? [] : [row.sampleid]),
     [validRows]
   );
-  const requestKey = ids.join(",");
+  const requestKey = selectionToken ?? ids.join(",");
 
   useEffect(() => {
     let cancelled = false;
-    if (ids.length === 0) return;
+    if (ids.length === 0 && !selectionToken) return;
 
-    getTaxaSampleProfiles(ids, 100)
+    getTaxaSampleProfiles(ids, 100, selectionToken)
       .then((data) => {
         if (!cancelled) setResult({ key: requestKey, data });
       })
@@ -132,7 +134,7 @@ export default function LinkedEnvironmentalExplorer({
     return () => {
       cancelled = true;
     };
-  }, [ids, requestKey]);
+  }, [ids, requestKey, selectionToken]);
 
   const profiles = result.key === requestKey ? result.data : [];
   const profilesLoading = result.key !== requestKey && ids.length > 0;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { getPublicationOptions } from "../../api/search";
 
@@ -32,6 +32,15 @@ type Props = {
     downloadControl,
   }: Props) {
     const [publications, setPublications] = useState<PublicationOption[]>([]);
+    const [publicationQuery, setPublicationQuery] = useState("");
+    const [publicationOpen, setPublicationOpen] = useState(false);
+    const visiblePublications = useMemo(() => {
+      const query = publicationQuery.trim().toLocaleLowerCase();
+      const matching = query
+        ? publications.filter((publication) => publication.citation.toLocaleLowerCase().includes(query))
+        : publications;
+      return matching.slice(0, 40);
+    }, [publicationQuery, publications]);
 
     useEffect(() => {
       let cancelled = false;
@@ -71,14 +80,45 @@ type Props = {
 
           <label style={{ gridColumn: "1 / -1" }}>
             <span style={{ display: "block", marginBottom: "4px" }}>Publication</span>
-            <select style={{ width: "100%" }} value={filters.publication_contains || ""} onChange={(e) => setFilters({ ...filters, publication_contains: e.target.value })}>
-              <option value="">All publications</option>
-              {publications.map((publication) => (
-                <option key={`${publication.filter_value}-${publication.citation}`} value={publication.filter_value}>
-                  {publication.citation}{publication.sample_count ? ` (${publication.sample_count.toLocaleString()} samples)` : ""}
-                </option>
-              ))}
-            </select>
+            <div style={{ position: "relative" }}>
+              <input
+                role="combobox"
+                aria-expanded={publicationOpen}
+                aria-controls="publication-options"
+                placeholder="Search publications…"
+                style={{ width: "100%", boxSizing: "border-box" }}
+                value={publicationQuery}
+                onFocus={() => setPublicationOpen(true)}
+                onBlur={() => window.setTimeout(() => setPublicationOpen(false), 120)}
+                onChange={(event) => {
+                  setPublicationQuery(event.target.value);
+                  setPublicationOpen(true);
+                  if (!event.target.value) setFilters({ ...filters, publication_contains: "" });
+                }}
+              />
+              {publicationOpen && (
+                <div id="publication-options" role="listbox" className="publication-options">
+                  <button type="button" role="option" onMouseDown={() => {
+                    setPublicationQuery("");
+                    setFilters({ ...filters, publication_contains: "" });
+                  }}>All publications</button>
+                  {visiblePublications.map((publication) => (
+                    <button
+                      type="button"
+                      role="option"
+                      key={publication.filter_value}
+                      onMouseDown={() => {
+                        setPublicationQuery(publication.citation);
+                        setFilters({ ...filters, publication_contains: publication.filter_value });
+                      }}
+                    >
+                      {publication.citation}{publication.sample_count ? ` (${publication.sample_count.toLocaleString()} samples)` : ""}
+                    </button>
+                  ))}
+                  {visiblePublications.length === 40 && <small>Type more to narrow the results.</small>}
+                </div>
+              )}
+            </div>
           </label>
 
           {[
@@ -99,7 +139,11 @@ type Props = {
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
-          <button type="button" onClick={onClear}>Clear</button>
+          <button type="button" onClick={() => {
+            setPublicationQuery("");
+            setPublicationOpen(false);
+            onClear();
+          }}>Clear</button>
           <button type="button" onClick={onSearch}>Search</button>
         </div>
       </section>

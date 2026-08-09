@@ -17,9 +17,11 @@ function formatNumber(value?: number | null, digits = 2) {
 export default function ModernAnalogueSearch({
   rows,
   onSnapshotChange,
+  selectionToken,
 }: {
   rows: SampleRow[];
   onSnapshotChange?: (snapshot: Record<string, unknown> | null) => void;
+  selectionToken?: string | null;
 }) {
   const samples = useMemo(
     () => rows.filter((row) => row.sampleid != null),
@@ -41,7 +43,7 @@ export default function ModernAnalogueSearch({
     if (target == null) return;
     setLoading(true);
     try {
-      const data = await findModernAnalogues(target, ids, 10, excludeSameSite, excludeSameDoi);
+      const data = await findModernAnalogues(target, ids, 10, excludeSameSite, excludeSameDoi, selectionToken);
       setResult({ key: currentKey, data });
     } catch (error) {
       console.error(error);

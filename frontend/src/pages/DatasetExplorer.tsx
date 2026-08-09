@@ -1,20 +1,27 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import SearchFilters, { type SearchFilterState } from "../components/search/SearchFilters";
 import SummaryCards from "../components/search/SummaryCards";
 import DownloadCSV from "../components/search/DownloadCSV";
 
-import SiteMap from "../components/visualization/SiteMap";
-import TaxaCompositionChart from "../components/visualization/TaxaCompositionChart";
-import LinkedEnvironmentalExplorer from "../components/visualization/LinkedEnvironmentalExplorer";
 import ViewportMount from "../components/visualization/ViewportMount";
 import CalibrationQualityPanel from "../components/analysis/CalibrationQualityPanel";
-import ModernAnalogueSearch from "../components/analysis/ModernAnalogueSearch";
-import CommunityNmds from "../components/analysis/CommunityNmds";
-import ReproducibilityPanel from "../components/analysis/ReproducibilityPanel";
 
-import { searchDatasets } from "../api/search";
+import { getSelectionRows, isRequestCanceled, searchDatasetPage, type SearchPage, type SearchSummary } from "../api/search";
 import { getTaxaBySamples } from "../api/taxa";
+
+// Keep mapping, plotting, and analysis libraries out of the initial page bundle.
+// Each feature is downloaded only when the user opens or selects it.
+const SiteMap = lazy(() => import("../components/visualization/SiteMap"));
+const TaxaCompositionChart = lazy(() => import("../components/visualization/TaxaCompositionChart"));
+const LinkedEnvironmentalExplorer = lazy(() => import("../components/visualization/LinkedEnvironmentalExplorer"));
+const ModernAnalogueSearch = lazy(() => import("../components/analysis/ModernAnalogueSearch"));
+const CommunityNmds = lazy(() => import("../components/analysis/CommunityNmds"));
+const ReproducibilityPanel = lazy(() => import("../components/analysis/ReproducibilityPanel"));
+
+function FeatureFallback() {
+  return <p className="feature-loading">Loading visualization…</p>;
+}
 
 type AnalysisGroupProps = {
   title: string;
@@ -32,6 +39,7 @@ function AnalysisGroup({
   onOpenChange,
 }: AnalysisGroupProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [hasOpened, setHasOpened] = useState(defaultOpen);
 
   return (
     <details
@@ -40,6 +48,7 @@ function AnalysisGroup({
       onToggle={(event) => {
         const open = event.currentTarget.open;
         setIsOpen(open);
+        if (open) setHasOpened(true);
         onOpenChange?.(open);
       }}
     >
@@ -49,7 +58,7 @@ function AnalysisGroup({
           <small>{description}</small>
         </span>
       </summary>
-      <div className="analysis-group__content">{children}</div>
+      {hasOpened && <div className="analysis-group__content">{children}</div>}
     </details>
   );
 }
@@ -66,6 +75,11 @@ export default function DatasetExplorer() {
   const [explorationOpen, setExplorationOpen] = useState(false);
   const [analogueSnapshot, setAnalogueSnapshot] = useState<Record<string, unknown> | null>(null);
   const [nmdsSnapshot, setNmdsSnapshot] = useState<Record<string, unknown> | null>(null);
+  const [selectionToken, setSelectionToken] = useState("");
+  const [baselineSelectionToken, setBaselineSelectionToken] = useState("");
+  const [resultTotal, setResultTotal] = useState(0);
+  const [searchSummary, setSearchSummary] = useState<SearchSummary | null>(null);
+  const activeSelectionRef = useRef("");
 
   const [filters, setFilters] = useState<SearchFilterState>({
     site_contains: "",
@@ -84,7 +98,7 @@ export default function DatasetExplorer() {
     loadData();
   }, []);
 
-  async function loadTaxaForSelectedRows(rowsForTaxa: any[]) {
+  async function loadTaxaForSelectedRows(rowsForTaxa: any[], token?: string | null) {
     const sampleids = rowsForTaxa
       .map((row) => row.sampleid)
       .filter(Boolean);
@@ -100,7 +114,8 @@ export default function DatasetExplorer() {
       const data = await getTaxaBySamples(
         sampleids,
         "taxon",
-        500
+        500,
+        token,
       );
 
       setTaxaRows(data);
@@ -112,24 +127,56 @@ export default function DatasetExplorer() {
     }
   }
 
+  function applySearchPage(data: SearchPage, isBaseline = false) {
+    setRows(data.rows);
+    setSelectedRows(data.rows);
+    setSelectionToken(data.selection_token);
+    activeSelectionRef.current = data.selection_token;
+    setResultTotal(data.total);
+    setSearchSummary(data.summary);
+    if (isBaseline) setBaselineSelectionToken(data.selection_token);
+  }
+
   async function loadData() {
-    const data = await searchDatasets();
+    try {
+      applySearchPage(await searchDatasetPage(), true);
+    } catch (error) {
+      if (!isRequestCanceled(error)) console.error(error);
+    }
+  }
 
-    setRows(data);
-    setAllRows(data);
-    setSelectedRows(data);
+  async function loadCompleteSelection(token = selectionToken) {
+    if (!token) return [];
+    const completeRows = await getSelectionRows(token);
+    if (token === activeSelectionRef.current) {
+      setRows(completeRows);
+      setSelectedRows(completeRows);
+    }
+    return completeRows;
+  }
 
+  async function prepareExploration(token = selectionToken) {
+    const completeRows = await loadCompleteSelection(token);
+    const referenceRows = allRows.length
+      ? allRows
+      : await getSelectionRows(baselineSelectionToken || selectionToken);
+    if (!allRows.length) setAllRows(referenceRows);
+    await loadTaxaForSelectedRows(completeRows, token);
   }
 
   async function handleSearch() {
-    const data = await searchDatasets(filters);
-
-    setRows(data);
-    setSelectedRows(data);
+    let data: SearchPage;
+    try {
+      data = await searchDatasetPage(filters);
+    } catch (error) {
+      if (!isRequestCanceled(error)) console.error(error);
+      return;
+    }
+    applySearchPage(data);
     setSelectedSite(null);
     setBbox(null);
 
-    if (explorationOpen) await loadTaxaForSelectedRows(data);
+    if (explorationOpen) await prepareExploration(data.selection_token);
   }
 
   async function clearFilters() {
@@ -146,11 +193,17 @@ export default function DatasetExplorer() {
       lon_max: "",
     };
     setFilters(emptyFilters);
-    setRows(allRows);
-    setSelectedRows(allRows);
+    let data: SearchPage;
+    try {
+      data = await searchDatasetPage(emptyFilters);
+    } catch (error) {
+      if (!isRequestCanceled(error)) console.error(error);
+      return;
+    }
+    applySearchPage(data);
     setSelectedSite(null);
     setBbox(null);
-    if (explorationOpen) await loadTaxaForSelectedRows(allRows);
+    if (explorationOpen) await prepareExploration(data.selection_token);
   }
 
   function selectRegion(bounds: any) {
@@ -195,8 +248,8 @@ export default function DatasetExplorer() {
         setFilters={setFilters}
         onSearch={handleSearch}
         onClear={clearFilters}
-        resultCount={selectedRows.length}
-        downloadControl={<DownloadCSV rows={selectedRows} />}
+        resultCount={bbox ? selectedRows.length : resultTotal}
+        downloadControl={<DownloadCSV rows={selectedRows} selectionToken={bbox ? null : selectionToken} />}
       />
 
       <AnalysisGroup
@@ -205,11 +258,11 @@ export default function DatasetExplorer() {
         defaultOpen
       >
         <div className="analysis-panel">
-          <CalibrationQualityPanel rows={selectedRows} />
+          <CalibrationQualityPanel rows={selectedRows} selectionToken={bbox ? null : selectionToken} />
         </div>
       </AnalysisGroup>
 
-      <SummaryCards rows={selectedRows} />
+      <SummaryCards rows={selectedRows} summary={bbox ? null : searchSummary} />
 
       <AnalysisGroup
         title="Exploratory visualization"
@@ -217,7 +270,7 @@ export default function DatasetExplorer() {
         onOpenChange={(open) => {
           setExplorationOpen(open);
           if (open && taxaRows.length === 0 && !taxaLoading) {
-            loadTaxaForSelectedRows(selectedRows);
+            prepareExploration();
           }
         }}
       >
@@ -270,17 +323,22 @@ export default function DatasetExplorer() {
         </p>
 
         {showMap ? (
-          <SiteMap
-            rows={rows}
-            onSiteSelect={setSelectedSite}
-            onBoundsSelect={selectRegion}
-          />
+          <Suspense fallback={<FeatureFallback />}>
+            <SiteMap
+              rows={rows}
+              onSiteSelect={setSelectedSite}
+              onBoundsSelect={selectRegion}
+            />
+          </Suspense>
         ) : (
           <ViewportMount>
-            <LinkedEnvironmentalExplorer
-              rows={selectedRows}
-              onSampleSelect={setSelectedSite}
-            />
+            <Suspense fallback={<FeatureFallback />}>
+              <LinkedEnvironmentalExplorer
+                rows={selectedRows}
+                onSampleSelect={setSelectedSite}
+                selectionToken={bbox ? null : selectionToken}
+              />
+            </Suspense>
           </ViewportMount>
         )}
       </div>
@@ -310,11 +368,14 @@ export default function DatasetExplorer() {
         ) : taxaRows.length === 0 ? (
           <p>No taxa data loaded for current selection.</p>
         ) : (
-          <TaxaCompositionChart
-            data={taxaRows}
-            rows={selectedRows}
-            referenceRows={allRows}
-          />
+          <Suspense fallback={<FeatureFallback />}>
+            <TaxaCompositionChart
+              data={taxaRows}
+              rows={selectedRows}
+              referenceRows={allRows}
+              selectionToken={bbox ? null : selectionToken}
+            />
+          </Suspense>
         )}
       </div>
       </AnalysisGroup>
@@ -322,26 +383,34 @@ export default function DatasetExplorer() {
       <AnalysisGroup
         title="Analyses (in development)"
         description="Compare assemblages and examine community structure."
+        onOpenChange={(open) => { if (open) loadCompleteSelection(); }}
       >
         <div className="analysis-panel">
-          <ModernAnalogueSearch rows={selectedRows} onSnapshotChange={setAnalogueSnapshot} />
+          <Suspense fallback={<FeatureFallback />}>
+            <ModernAnalogueSearch rows={selectedRows} selectionToken={bbox ? null : selectionToken} onSnapshotChange={setAnalogueSnapshot} />
+          </Suspense>
         </div>
         <div className="analysis-panel">
-          <CommunityNmds rows={selectedRows} onSnapshotChange={setNmdsSnapshot} />
+          <Suspense fallback={<FeatureFallback />}>
+            <CommunityNmds rows={selectedRows} selectionToken={bbox ? null : selectionToken} onSnapshotChange={setNmdsSnapshot} />
+          </Suspense>
         </div>
       </AnalysisGroup>
 
       <AnalysisGroup
         title="Reproducibility"
         description="Record the active dataset selection, methods, diagnostics, and results."
+        onOpenChange={(open) => { if (open) loadCompleteSelection(); }}
       >
         <div className="analysis-panel">
-          <ReproducibilityPanel
-            filters={filters}
-            rows={selectedRows}
-            analogueSnapshot={analogueSnapshot}
-            nmdsSnapshot={nmdsSnapshot}
-          />
+          <Suspense fallback={<FeatureFallback />}>
+            <ReproducibilityPanel
+              filters={filters}
+              rows={selectedRows}
+              analogueSnapshot={analogueSnapshot}
+              nmdsSnapshot={nmdsSnapshot}
+            />
+          </Suspense>
         </div>
       </AnalysisGroup>
     </div>

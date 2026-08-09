@@ -167,6 +167,8 @@ def main():
             dataset_publications,
         )
         with connection.cursor() as cursor:
+            cursor.execute("REFRESH MATERIALIZED VIEW publication_sample_summary")
+            cursor.execute("REFRESH MATERIALIZED VIEW sample_coverage_summary")
             cursor.execute(
                 """
                 INSERT INTO data_refreshes (

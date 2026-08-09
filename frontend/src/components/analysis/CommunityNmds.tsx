@@ -36,9 +36,11 @@ function categoryGroups(points: NmdsPoint[], field: "sitename" | "dominant_taxon
 export default function CommunityNmds({
   rows,
   onSnapshotChange,
+  selectionToken,
 }: {
   rows: SampleRow[];
   onSnapshotChange?: (snapshot: Record<string, unknown> | null) => void;
+  selectionToken?: string | null;
 }) {
   const ids = useMemo(
     () => Array.from(new Set(rows.flatMap((row) => row.sampleid == null ? [] : [row.sampleid]))),
@@ -76,7 +78,7 @@ export default function CommunityNmds({
         dimensions,
         targetSampleid,
         runSensitivity,
-      });
+      }, selectionToken);
       setResult(data);
       setResultKey(currentAnalysisKey);
     } catch (error) {

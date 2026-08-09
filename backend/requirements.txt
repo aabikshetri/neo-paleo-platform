@@ -5,3 +5,4 @@ numpy
 scipy
 scikit-learn
 psycopg[binary,pool]
+redis>=5,<7

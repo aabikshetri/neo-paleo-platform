@@ -8,12 +8,12 @@ function percentage(part: number, total: number) {
   return total > 0 ? (part / total) * 100 : 0;
 }
 
-export default function CalibrationQualityPanel({ rows }: { rows: SampleRow[] }) {
+export default function CalibrationQualityPanel({ rows, selectionToken }: { rows: SampleRow[]; selectionToken?: string | null }) {
   const ids = useMemo(
     () => Array.from(new Set(rows.flatMap((row) => row.sampleid == null ? [] : [row.sampleid]))),
     [rows]
   );
-  const requestKey = ids.join(",");
+  const requestKey = selectionToken ?? ids.join(",");
   const [result, setResult] = useState<{ key: string; data: CalibrationQuality | null }>({
     key: "",
     data: null,
@@ -22,8 +22,8 @@ export default function CalibrationQualityPanel({ rows }: { rows: SampleRow[] })
 
   useEffect(() => {
     let cancelled = false;
-    if (ids.length === 0) return;
-    getCalibrationQuality(ids)
+    if (ids.length === 0 && !selectionToken) return;
+    getCalibrationQuality(ids, selectionToken)
       .then((data) => {
         if (!cancelled) setResult({ key: requestKey, data });
       })
@@ -32,7 +32,7 @@ export default function CalibrationQualityPanel({ rows }: { rows: SampleRow[] })
         if (!cancelled) setErrorKey(requestKey);
       });
     return () => { cancelled = true; };
-  }, [ids, requestKey]);
+  }, [ids, requestKey, selectionToken]);
 
   const quality = result.key === requestKey ? result.data : null;
   if (!quality) return (

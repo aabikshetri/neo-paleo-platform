@@ -7,16 +7,48 @@ export default function Footer() {
         marginTop: "auto",
         display: "flex",
         justifyContent: "space-between",
-        gap: "16px",
+        alignItems: "flex-start",
+        gap: "20px 36px",
         flexWrap: "wrap",
         textAlign: "left",
         fontSize: "0.82rem",
         opacity: 0.72,
       }}
     >
-      <span>Data source: Neotoma Paleoecology Database</span>
-      <span>Composition normalized within each sample at the finest taxonomic resolution recorded by Neotoma.</span>
-      <span>Aabiskar Thapa Kshetri and Robert K. Booth, 2026. Contact: aat226@lehigh.edu · rkb205@lehigh.edu</span>
+      <ul
+        style={{
+          listStyle: "none",
+          margin: 0,
+          padding: 0,
+          display: "grid",
+          gap: "7px",
+          flex: "1 1 380px",
+        }}
+      >
+        <li>
+          <strong>Authors:</strong> Aabiskar Thapa Kshetri and Robert K. Booth, 2026
+        </li>
+        <li>
+          <strong>Contact:</strong>{" "}
+          <a href="mailto:aabiskar0232@gmail.com">aabiskar0232@gmail.com</a>
+          {" · "}
+          <a href="mailto:rkb205@lehigh.edu">rkb205@lehigh.edu</a>
+        </li>
+      </ul>
+      <ul
+        style={{
+          listStyle: "none",
+          margin: 0,
+          padding: 0,
+          display: "grid",
+          gap: "7px",
+          flex: "0 1 360px",
+          textAlign: "right",
+        }}
+      >
+        <li><strong>Data source:</strong> Neotoma Paleoecology Database</li>
+        <li> AmoebaScope Logo by London Diiorio</li>
+      </ul>
     </footer>
   );
 }

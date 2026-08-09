@@ -19,7 +19,9 @@ from pathlib import Path
 
 import pandas as pd
 
-_pool = None
+from backend.cache import get_shared, set_shared
+
+_pools = {}
 _query_cache = OrderedDict()
 _query_cache_lock = Lock()
 _query_cache_max = max(16, int(os.getenv("DATABASE_CACHE_SIZE", "64")))
@@ -55,13 +57,13 @@ def _connect(url: str):
     return psycopg.connect(url)
 
 
-def _connection():
+def _connection(read_only: bool = True):
     """Borrow a reusable PostgreSQL connection from the process-local pool."""
-    global _pool
-    url = database_url()
+    url = os.getenv("READ_DATABASE_URL") if read_only else None
+    url = url or database_url()
     if not url:
         raise RuntimeError("DATABASE_URL is not set")
-    if _pool is None:
+    if url not in _pools:
         try:
             from psycopg_pool import ConnectionPool
         except ImportError as error:
@@ -69,21 +71,20 @@ def _connection():
                 "PostgreSQL pooling is unavailable. Run: "
                 "pip install -r backend/requirements.txt"
             ) from error
-        _pool = ConnectionPool(
+        _pools[url] = ConnectionPool(
             conninfo=url,
             min_size=1,
             max_size=max(2, int(os.getenv("DATABASE_POOL_SIZE", "8"))),
             timeout=10,
             open=True,
         )
-    return _pool.connection()
+    return _pools[url].connection()
 
 
 def close_database_pool():
-    global _pool
-    if _pool is not None:
-        _pool.close()
-        _pool = None
+    for pool in _pools.values():
+        pool.close()
+    _pools.clear()
 
 
 atexit.register(close_database_pool)
@@ -95,7 +96,7 @@ def _current_refresh_version():
     now = monotonic()
     if now - _refresh_version[0] < 5:
         return _refresh_version[1]
-    with _connection() as connection:
+    with _connection(read_only=False) as connection:
         with connection.cursor() as cursor:
             cursor.execute("SELECT MAX(refreshid) FROM data_refreshes")
             version = cursor.fetchone()[0]
@@ -104,7 +105,8 @@ def _current_refresh_version():
 
 
 def _cached(namespace: str, key: tuple, producer):
-    cache_key = (namespace, _current_refresh_version(), key)
+    version = _current_refresh_version()
+    cache_key = (namespace, version, key)
     now = monotonic()
     with _query_cache_lock:
         cached = _query_cache.get(cache_key)
@@ -113,7 +115,13 @@ def _cached(namespace: str, key: tuple, producer):
             return cached[1]
         if cached:
             del _query_cache[cache_key]
+    shared, found = get_shared(namespace, version, key)
+    if found:
+        with _query_cache_lock:
+            _query_cache[cache_key] = (now, shared)
+        return shared
     value = producer()
+    set_shared(namespace, version, key, value, _query_cache_ttl)
     with _query_cache_lock:
         _query_cache[cache_key] = (now, value)
         _query_cache.move_to_end(cache_key)
@@ -126,6 +134,12 @@ def _frame_from_cursor(cursor) -> pd.DataFrame:
     rows = cursor.fetchall()
     columns = [column.name for column in cursor.description]
     return pd.DataFrame(rows, columns=columns)
+
+
+def _relation_exists(cursor, relation: str) -> bool:
+    """Check optional acceleration structures without breaking older databases."""
+    cursor.execute("SELECT to_regclass(%s)", (relation,))
+    return cursor.fetchone()[0] is not None
 
 
 def load_from_postgres(url: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -237,6 +251,74 @@ def search_postgres(
     return _cached("search", cache_key, run)
 
 
+def search_page_postgres(*, page: int, page_size: int, **filters) -> tuple[list[dict], int, dict]:
+    """Return one ordered search page and its total without materializing all rows."""
+    publicationid = filters.pop("publicationid", None)
+    joins = ""
+    conditions = []
+    parameters = []
+    if publicationid is not None:
+        joins = "JOIN dataset_publications dp ON dp.datasetid = s.datasetid"
+        conditions.append("dp.publicationid = %s")
+        parameters.append(publicationid)
+    mappings = (
+        ("s.ph >= %s", "ph_min"), ("s.ph <= %s", "ph_max"),
+        ("s.water_table_depth >= %s", "water_min"),
+        ("s.water_table_depth <= %s", "water_max"),
+        ("s.latitude >= %s", "lat_min"), ("s.latitude <= %s", "lat_max"),
+        ("s.longitude >= %s", "lon_min"), ("s.longitude <= %s", "lon_max"),
+    )
+    for condition, name in mappings:
+        value = filters.get(name)
+        if value is not None:
+            conditions.append(condition)
+            parameters.append(value)
+    if filters.get("site_contains"):
+        conditions.append("s.sitename ILIKE %s")
+        parameters.append(f"%{filters['site_contains']}%")
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    offset = (page - 1) * page_size
+    query = f"""
+        WITH filtered AS (
+            SELECT DISTINCT s.datasetid, s.siteid, s.sitename, s.sampleid,
+                   s.ph AS "pH", s.water_table_depth, s.altitude,
+                   s.latitude, s.longitude, s.doi
+            FROM samples s {joins} {where}
+        ), stats AS (
+            SELECT COUNT(*)::INTEGER AS total_count,
+                   COUNT(DISTINCT siteid)::INTEGER AS site_count,
+                   AVG("pH")::DOUBLE PRECISION AS mean_ph,
+                   AVG(water_table_depth)::DOUBLE PRECISION AS mean_water
+            FROM filtered
+        )
+        SELECT filtered.*, stats.*
+        FROM filtered CROSS JOIN stats
+        ORDER BY sampleid LIMIT %s OFFSET %s
+    """
+
+    def run():
+        with _connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query, [*parameters, page_size, offset])
+                frame = _frame_from_cursor(cursor)
+        if frame.empty:
+            return [], 0, {"samples": 0, "sites": 0, "mean_pH": None, "mean_water_table_depth": None}
+        total = int(frame["total_count"].iloc[0])
+        summary = {
+            "samples": total,
+            "sites": int(frame["site_count"].iloc[0]),
+            "mean_pH": frame["mean_ph"].iloc[0],
+            "mean_water_table_depth": frame["mean_water"].iloc[0],
+        }
+        frame = frame.drop(columns=["total_count", "site_count", "mean_ph", "mean_water"])
+        frame = frame.astype(object).where(pd.notnull(frame), None)
+        summary = {key: (None if pd.isna(value) else value) for key, value in summary.items()}
+        return frame.to_dict(orient="records"), total, summary
+
+    key = (page, page_size, tuple(sorted(filters.items())), publicationid)
+    return _cached("search_page", key, run)
+
+
 def publication_options_postgres() -> list[dict]:
     url = database_url()
     if not url:
@@ -244,20 +326,30 @@ def publication_options_postgres() -> list[dict]:
     def run():
         with _connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(
-                """
-                SELECT p.publicationid, p.citation, p.year, p.doi,
-                       COUNT(DISTINCT s.sampleid)::INTEGER AS sample_count,
-                       COUNT(DISTINCT s.sampleid) FILTER (
-                           WHERE dp.primarypub IS TRUE
-                       )::INTEGER AS primary_sample_count
-                FROM publications p
-                JOIN dataset_publications dp USING (publicationid)
-                JOIN samples s ON s.datasetid = dp.datasetid
-                GROUP BY p.publicationid, p.citation, p.year, p.doi
-                ORDER BY LOWER(p.citation)
-                """
-                )
+                if _relation_exists(cursor, "publication_sample_summary"):
+                    cursor.execute(
+                        """
+                        SELECT publicationid, citation, year, doi,
+                               sample_count, primary_sample_count
+                        FROM publication_sample_summary
+                        ORDER BY LOWER(citation)
+                        """
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT p.publicationid, p.citation, p.year, p.doi,
+                               COUNT(DISTINCT s.sampleid)::INTEGER AS sample_count,
+                               COUNT(DISTINCT s.sampleid) FILTER (
+                                   WHERE dp.primarypub IS TRUE
+                               )::INTEGER AS primary_sample_count
+                        FROM publications p
+                        JOIN dataset_publications dp USING (publicationid)
+                        JOIN samples s ON s.datasetid = dp.datasetid
+                        GROUP BY p.publicationid, p.citation, p.year, p.doi
+                        ORDER BY LOWER(p.citation)
+                        """
+                    )
                 frame = _frame_from_cursor(cursor)
         frame["filter_value"] = frame["publicationid"].map(
             lambda value: f"publication:{int(value)}"
@@ -341,14 +433,24 @@ def calibration_quality_postgres(sampleids: list[int]) -> dict:
     def run():
         with _connection() as connection:
           with connection.cursor() as cursor:
-            cursor.execute(
+            if _relation_exists(cursor, "sample_coverage_summary"):
+                richness_source = """
+                    SELECT c.sampleid, c.taxon_count
+                    FROM sample_coverage_summary c JOIN selected s USING (sampleid)
+                    WHERE c.taxon_count > 0
                 """
-                WITH selected AS (
-                    SELECT * FROM samples WHERE sampleid = ANY(%s)
-                ), richness AS (
+            else:
+                richness_source = """
                     SELECT p.sampleid, COUNT(*)::INTEGER AS taxon_count
                     FROM sample_taxon_profiles p JOIN selected s USING (sampleid)
                     GROUP BY p.sampleid
+                """
+            cursor.execute(
+                f"""
+                WITH selected AS (
+                    SELECT * FROM samples WHERE sampleid = ANY(%s)
+                ), richness AS (
+                    {richness_source}
                 ), doi_tokens AS (
                     SELECT DISTINCT NULLIF(
                         regexp_replace(lower(btrim(token)),

@@ -21,12 +21,13 @@ type Props = {
   referenceData?: TaxaComposition[];
   rows?: SampleRow[];
   referenceRows?: SampleRow[];
+  selectionToken?: string | null;
 };
 
 const Plot = lazy(() => import("./PlotlyChart"));
 
 export default function TaxaCompositionChart(props: Props) {
-  const { data, rows = [] } = props;
+  const { data, rows = [], selectionToken } = props;
   const [selectedTaxa, setSelectedTaxa] = useState<string[]>([]);
   const [dimensions, setDimensions] = useState<2 | 3>(2);
   const [aggregation, setAggregation] = useState<"combined" | "individual">("combined");
@@ -67,7 +68,7 @@ export default function TaxaCompositionChart(props: Props) {
   useEffect(() => {
     let cancelled = false;
     if (!ids.length || !displayedTaxa.length) return;
-    getTaxonSampleValues(ids, displayedTaxa)
+    getTaxonSampleValues(ids, displayedTaxa, selectionToken)
       .then((values) => {
         if (!cancelled) setResult({ key: requestKey, values });
       })
@@ -76,7 +77,7 @@ export default function TaxaCompositionChart(props: Props) {
         if (!cancelled) setResult({ key: requestKey, values: [] });
       });
     return () => { cancelled = true; };
-  }, [ids, displayedTaxa, requestKey]);
+  }, [ids, displayedTaxa, requestKey, selectionToken]);
 
   const values = result.key === requestKey ? result.values : [];
   const loading = result.key !== requestKey && ids.length > 0;

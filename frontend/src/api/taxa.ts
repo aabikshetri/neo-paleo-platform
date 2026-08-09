@@ -124,19 +124,26 @@ const taxonValueRequests = new Map<string, Promise<TaxonSampleValue[]>>();
 const aggregateRequests = new Map<string, Promise<any[]>>();
 const qualityRequests = new Map<string, Promise<CalibrationQuality>>();
 
+function selectionPayload(sampleids: number[], selectionToken?: string | null) {
+  return selectionToken
+    ? { selection_token: selectionToken }
+    : { sampleids: Array.from(new Set(sampleids)).sort((a, b) => a - b) };
+}
+
 export async function getTaxaBySamples(
   sampleids: number[],
   level = "taxon",
-  limit = 500
+  limit = 500,
+  selectionToken?: string | null,
 ) {
   const ids = Array.from(new Set(sampleids)).sort((a, b) => a - b);
-  const key = `${level}:${limit}:${ids.join(",")}`;
+  const key = `${level}:${limit}:${selectionToken ?? ids.join(",")}`;
   const existing = aggregateRequests.get(key);
   if (existing) return existing;
 
   if (aggregateRequests.size >= 20) aggregateRequests.clear();
   const request = axios.post(`${API}/taxa/aggregate`, {
-    sampleids: ids,
+    ...selectionPayload(ids, selectionToken),
     level,
     limit,
   }).then((response) => response.data).catch((error) => {
@@ -168,16 +175,17 @@ export async function getTaxaCompositionBySample(
 
 export async function getTaxaSampleProfiles(
   sampleids: number[],
-  limit = 8
+  limit = 8,
+  selectionToken?: string | null,
 ): Promise<TaxaSampleProfile[]> {
   const ids = Array.from(new Set(sampleids)).sort((a, b) => a - b);
-  const key = `${limit}:${ids.join(",")}`;
+  const key = `${limit}:${selectionToken ?? ids.join(",")}`;
   const existing = profileRequests.get(key);
   if (existing) return existing;
 
   if (profileRequests.size >= 20) profileRequests.clear();
   const request = axios.post(`${API}/taxa/sample-profiles`, {
-    sampleids: ids,
+    ...selectionPayload(ids, selectionToken),
     level: "taxon",
     limit,
   }).then((response) => response.data).catch((error) => {
@@ -196,17 +204,18 @@ export type TaxonSampleValue = {
 
 export async function getTaxonSampleValues(
   sampleids: number[],
-  taxa: string[]
+  taxa: string[],
+  selectionToken?: string | null,
 ): Promise<TaxonSampleValue[]> {
   const ids = Array.from(new Set(sampleids)).sort((a, b) => a - b);
   const selectedTaxa = Array.from(new Set(taxa));
-  const key = `${ids.join(",")}|${selectedTaxa.join("|")}`;
+  const key = `${selectionToken ?? ids.join(",")}|${selectedTaxa.join("|")}`;
   const existing = taxonValueRequests.get(key);
   if (existing) return existing;
 
   if (taxonValueRequests.size >= 20) taxonValueRequests.clear();
   const request = axios.post(`${API}/taxa/sample-values`, {
-    sampleids: ids,
+    ...selectionPayload(ids, selectionToken),
     taxa: selectedTaxa,
   }).then((response) => response.data).catch((error) => {
     taxonValueRequests.delete(key);
@@ -216,10 +225,10 @@ export async function getTaxonSampleValues(
   return request;
 }
 
-export async function downloadFilteredTaxaCsv(sampleids: number[]) {
+export async function downloadFilteredTaxaCsv(sampleids: number[], selectionToken?: string | null) {
   const response = await axios.post(
     `${API}/export/taxa-csv`,
-    { sampleids },
+    selectionPayload(sampleids, selectionToken),
     { responseType: "blob" }
   );
   const url = URL.createObjectURL(response.data);
@@ -231,15 +240,16 @@ export async function downloadFilteredTaxaCsv(sampleids: number[]) {
 }
 
 export async function getCalibrationQuality(
-  sampleids: number[]
+  sampleids: number[],
+  selectionToken?: string | null,
 ): Promise<CalibrationQuality> {
   const ids = Array.from(new Set(sampleids)).sort((a, b) => a - b);
-  const key = ids.join(",");
+  const key = selectionToken ?? ids.join(",");
   const existing = qualityRequests.get(key);
   if (existing) return existing;
 
   if (qualityRequests.size >= 20) qualityRequests.clear();
-  const request = axios.post(`${API}/calibration/quality`, { sampleids: ids })
+  const request = axios.post(`${API}/calibration/quality`, selectionPayload(ids, selectionToken))
     .then((response) => response.data)
     .catch((error) => {
       qualityRequests.delete(key);
@@ -254,16 +264,32 @@ export async function findModernAnalogues(
   calibrationSampleids: number[],
   limit = 10,
   excludeSameSite = true,
-  excludeSameDoi = true
+  excludeSameDoi = true,
+  selectionToken?: string | null,
 ): Promise<AnalogueResult> {
-  const response = await axios.post(`${API}/calibration/modern-analogues`, {
+  const response = await axios.post(`${API}/jobs/modern-analogues`, {
     target_sampleid: targetSampleid,
-    calibration_sampleids: calibrationSampleids,
+    ...(selectionToken
+      ? { selection_token: selectionToken }
+      : { calibration_sampleids: calibrationSampleids }),
     limit,
     exclude_same_site: excludeSameSite,
     exclude_same_doi: excludeSameDoi,
   });
-  return response.data;
+  return awaitAnalysisJob<AnalogueResult>(response.data);
+}
+
+async function awaitAnalysisJob<T>(submission: any): Promise<T> {
+  if (submission.status === "complete") return submission.result;
+  const jobId = submission.job_id;
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    const status = await axios.get(`${API}/jobs/${jobId}`);
+    if (status.data.status === "complete") return status.data.result;
+    if (status.data.status === "failed") throw new Error(status.data.detail || "Analysis job failed");
+    if (status.data.status === "not_found") throw new Error("Analysis job expired or was not found");
+  }
+  throw new Error("Analysis job did not finish within two minutes");
 }
 
 export async function runNmds(
@@ -276,10 +302,11 @@ export async function runNmds(
     dimensions: number;
     targetSampleid?: number | null;
     runSensitivity: boolean;
-  }
+  },
+  selectionToken?: string | null,
 ): Promise<NmdsResult> {
-  const response = await axios.post(`${API}/calibration/nmds`, {
-    sampleids,
+  const response = await axios.post(`${API}/jobs/nmds`, {
+    ...selectionPayload(sampleids, selectionToken),
     max_samples: settings.maxSamples,
     prevalence: settings.prevalence,
     random_seed: settings.randomSeed,
@@ -288,5 +315,5 @@ export async function runNmds(
     target_sampleid: settings.targetSampleid,
     run_sensitivity: settings.runSensitivity,
   });
-  return response.data;
+  return awaitAnalysisJob<NmdsResult>(response.data);
 }

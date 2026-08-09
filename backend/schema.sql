@@ -101,3 +101,28 @@ CREATE TABLE IF NOT EXISTS data_refreshes (
     publication_count INTEGER,
     notes TEXT
 );
+
+-- Refreshed after each successful runtime import. These summaries avoid
+-- repeatedly grouping the largest relationship tables on interactive reads.
+CREATE MATERIALIZED VIEW IF NOT EXISTS publication_sample_summary AS
+SELECT p.publicationid, p.citation, p.year, p.doi,
+       COUNT(DISTINCT s.sampleid)::INTEGER AS sample_count,
+       COUNT(DISTINCT s.sampleid) FILTER (
+           WHERE dp.primarypub IS TRUE
+       )::INTEGER AS primary_sample_count
+FROM publications p
+JOIN dataset_publications dp USING (publicationid)
+JOIN samples s ON s.datasetid = dp.datasetid
+GROUP BY p.publicationid, p.citation, p.year, p.doi;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ix_publication_sample_summary_id
+    ON publication_sample_summary (publicationid);
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS sample_coverage_summary AS
+SELECT s.sampleid, COUNT(p.lumped_taxon)::INTEGER AS taxon_count
+FROM samples s
+LEFT JOIN sample_taxon_profiles p USING (sampleid)
+GROUP BY s.sampleid;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ix_sample_coverage_summary_id
+    ON sample_coverage_summary (sampleid);
