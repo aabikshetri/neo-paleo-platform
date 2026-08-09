@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { findModernAnalogues, type AnalogueResult } from "../../api/taxa";
 import { taxonColor } from "../visualization/taxaColors";
@@ -38,20 +38,30 @@ export default function ModernAnalogueSearch({
   const currentKey = `${target}|${excludeSameSite}|${excludeSameDoi}|${ids.join(",")}`;
   const [result, setResult] = useState<{ key: string; data: AnalogueResult | null }>({ key: "", data: null });
   const [loading, setLoading] = useState(false);
+  const activeRequest = useRef<AbortController | null>(null);
 
   async function runSearch() {
     if (target == null) return;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
     setLoading(true);
     try {
-      const data = await findModernAnalogues(target, ids, 10, excludeSameSite, excludeSameDoi, selectionToken);
+      const data = await findModernAnalogues(target, ids, 10, excludeSameSite, excludeSameDoi, selectionToken, controller.signal);
       setResult({ key: currentKey, data });
     } catch (error) {
+      if (controller.signal.aborted) return;
       console.error(error);
       setResult({ key: currentKey, data: { error: "The analogue search could not be completed.", matches: [] } });
     } finally {
-      setLoading(false);
+      if (activeRequest.current === controller) {
+        activeRequest.current = null;
+        setLoading(false);
+      }
     }
   }
+
+  useEffect(() => () => activeRequest.current?.abort(), [currentKey]);
 
   const activeResult = result.key === currentKey ? result.data : null;
 

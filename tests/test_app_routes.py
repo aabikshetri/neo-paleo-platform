@@ -31,6 +31,7 @@ EXPECTED_ROUTES = {
     ("POST", "/jobs/nmds"),
     ("POST", "/jobs/modern-analogues"),
     ("GET", "/jobs/{job_id}"),
+    ("DELETE", "/jobs/{job_id}"),
     ("POST", "/export/taxa-csv"),
 }
 

@@ -685,15 +685,8 @@ def calibration_nmds(request: NmdsRequest):
         max(1, min(request.n_init, 20)),
         request.random_seed,
     )
-    comparison_dimension = 3 if dimensions == 2 else 2
-    _, _, comparison_stress = fit_nmds(
-        comparison_dimension,
-        max(1, min(request.n_init, 20)),
-        request.random_seed,
-    )
     stress_by_dimension = {
         str(dimensions): stress,
-        str(comparison_dimension): comparison_stress,
     }
     stress_kind = "normalized Stress-1" if supports_normalized_stress else "approximated normalized stress"
 
@@ -714,6 +707,13 @@ def calibration_nmds(request: NmdsRequest):
     initialization_sensitivity = []
     prevalence_sensitivity = []
     if request.run_sensitivity:
+        comparison_dimension = 3 if dimensions == 2 else 2
+        _, _, comparison_stress = fit_nmds(
+            comparison_dimension,
+            max(1, min(request.n_init, 20)),
+            request.random_seed,
+        )
+        stress_by_dimension[str(comparison_dimension)] = comparison_stress
         for seed in [request.random_seed + 1, request.random_seed + 2]:
             _, alternate_coordinates, alternate_stress = fit_nmds(
                 dimensions,

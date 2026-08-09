@@ -44,4 +44,4 @@ class NmdsRequest(SelectionRequest):
     n_init: int = 10
     dimensions: int = 2
     target_sampleid: Optional[int] = None
-    run_sensitivity: bool = True
+    run_sensitivity: bool = False

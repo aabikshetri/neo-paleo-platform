@@ -51,7 +51,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  worker:
+  worker-analogue:
     image: amoebascope-backend:local
     build:
       context: .
@@ -61,6 +61,25 @@ services:
       DATABASE_URL: postgresql://neo:neo-development@postgres:5432/neo
       REDIS_URL: redis://redis:6379/0
       DATABASE_POOL_SIZE: 2
+      SCIENTIFIC_JOB_TYPES: modern_analogue
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker-nmds:
+    image: amoebascope-backend:local
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "backend.worker"]
+    environment:
+      DATABASE_URL: postgresql://neo:neo-development@postgres:5432/neo
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_POOL_SIZE: 2
+      SCIENTIFIC_JOB_TYPES: nmds
     depends_on:
       postgres:
         condition: service_healthy

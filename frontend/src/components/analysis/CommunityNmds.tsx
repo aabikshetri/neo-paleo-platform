@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import { runNmds, type NmdsPoint, type NmdsResult } from "../../api/taxa";
 import { taxonColor } from "../visualization/taxaColors";
@@ -51,9 +51,10 @@ export default function CommunityNmds({
   const [dimensions, setDimensions] = useState(2);
   const [nInit, setNInit] = useState(10);
   const [targetSampleid, setTargetSampleid] = useState<number | null>(null);
-  const [runSensitivity, setRunSensitivity] = useState(true);
+  const [runSensitivity, setRunSensitivity] = useState(false);
   const [colorBy, setColorBy] = useState<"pH" | "water_table_depth" | "dominant_taxon" | "sitename">("pH");
   const [loading, setLoading] = useState(false);
+  const activeRequest = useRef<AbortController | null>(null);
   const [result, setResult] = useState<NmdsResult | null>(null);
   const [resultKey, setResultKey] = useState("");
   const [plotRevision, setPlotRevision] = useState(0);
@@ -68,6 +69,9 @@ export default function CommunityNmds({
   });
 
   async function calculate() {
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
     setLoading(true);
     try {
       const data = await runNmds(ids, {
@@ -78,16 +82,22 @@ export default function CommunityNmds({
         dimensions,
         targetSampleid,
         runSensitivity,
-      }, selectionToken);
+      }, selectionToken, controller.signal);
       setResult(data);
       setResultKey(currentAnalysisKey);
     } catch (error) {
+      if (controller.signal.aborted) return;
       console.error(error);
       setResult({ error: "NMDS could not be completed. Confirm that the updated backend is running.", points: [] });
     } finally {
-      setLoading(false);
+      if (activeRequest.current === controller) {
+        activeRequest.current = null;
+        setLoading(false);
+      }
     }
   }
+
+  useEffect(() => () => activeRequest.current?.abort(), [currentAnalysisKey]);
 
   function downloadCoordinates() {
     if (!result?.points.length) return;
@@ -265,7 +275,7 @@ export default function CommunityNmds({
         </label>
         <label style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
           <input type="checkbox" checked={runSensitivity} onChange={(event) => setRunSensitivity(event.target.checked)} />
-          Run sensitivity diagnostics
+          Run extended sensitivity diagnostics (slower)
         </label>
         <button type="button" onClick={calculate} disabled={loading || ids.length < 3}>
           {loading ? "Running NMDS…" : "Run NMDS"}

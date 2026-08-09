@@ -27,7 +27,7 @@ service.
 Start Docker Desktop, then run from the repository root:
 
 ```bash
-docker compose up -d postgres redis backend worker
+docker compose up -d postgres redis backend worker-analogue worker-nmds
 docker compose ps
 ```
 
@@ -166,7 +166,7 @@ observations, and 6,326 dataset-publication links.
 
 ```bash
 docker compose build backend
-docker compose up -d postgres redis backend worker
+docker compose up -d postgres redis backend worker-analogue worker-nmds
 docker compose ps
 ```
 
@@ -177,7 +177,8 @@ Expected services:
 | `postgres` | Runtime scientific database | `127.0.0.1:5433` |
 | `redis` | Shared cache and job queue | Docker network only |
 | `backend` | FastAPI application | `127.0.0.1:8001` |
-| `worker` | NMDS and analogue jobs | Docker network only |
+| `worker-analogue` | Fast modern-analogue jobs | Docker network only |
+| `worker-nmds` | CPU-intensive NMDS jobs | Docker network only |
 
 Verify them:
 
@@ -185,7 +186,7 @@ Verify them:
 docker compose exec postgres pg_isready -U neo -d neo
 docker compose exec redis redis-cli ping
 curl http://127.0.0.1:8001/health
-docker compose logs --tail=30 backend worker
+docker compose logs --tail=30 backend worker-analogue worker-nmds
 ```
 
 ### 7. Start the frontend
@@ -217,7 +218,7 @@ Start:
 
 ```bash
 cd ~/neo-paleo-platform
-docker compose up -d postgres redis backend worker
+docker compose up -d postgres redis backend worker-analogue worker-nmds
 ```
 
 Then start the frontend from `frontend/` as shown above.
@@ -269,7 +270,8 @@ sequenceDiagram
     participant F as React frontend
     participant A as FastAPI workers
     participant R as Redis
-    participant W as Scientific worker
+    participant WA as Analogue worker
+    participant WN as NMDS worker
     participant P as PostgreSQL
 
     U->>F: Filter samples
@@ -284,10 +286,16 @@ sequenceDiagram
 
     U->>F: Run NMDS or analogue analysis
     F->>A: POST /jobs/...
-    A->>R: Queue job
-    W->>R: Claim job
-    W->>P: Read selected scientific data
-    W->>R: Store result
+    A->>R: Deduplicate and queue by analysis type
+    alt Analogue search
+        WA->>R: Claim analogue job
+        WA->>P: Read selected scientific data
+        WA->>R: Store result
+    else NMDS
+        WN->>R: Claim NMDS job
+        WN->>P: Read selected scientific data
+        WN->>R: Store result
+    end
     F->>A: Poll job status
     A-->>F: Completed result
 ```
@@ -307,6 +315,9 @@ sample IDs. Existing explicit `sampleids` request bodies remain supported.
 - Percentage-weighted means estimate pH or water-table optima.
 - Bray-Curtis dissimilarity is used for analogue and NMDS workflows.
 - Fixed seeds and recorded settings support reproducibility.
+- The normal NMDS run performs the requested ordination only. Optional extended
+  sensitivity diagnostics add a comparison-dimensionality fit and two
+  alternate-seed fits, so they can take roughly four times as long.
 
 These rules are shared between PostgreSQL and processed-file fallback paths.
 
@@ -374,6 +385,7 @@ Important endpoints:
 | `POST /jobs/nmds` | Queue or synchronously execute NMDS |
 | `POST /jobs/modern-analogues` | Queue or execute analogue analysis |
 | `GET /jobs/{job_id}` | Background-job status and result |
+| `DELETE /jobs/{job_id}` | Cancel an obsolete queued job |
 
 The original synchronous calibration endpoints remain available for backwards
 compatibility.
@@ -387,6 +399,7 @@ Copy `.env.example` as a reference. Do not commit passwords or production URLs.
 | `DATABASE_URL` | Primary PostgreSQL connection; enables PostgreSQL mode |
 | `READ_DATABASE_URL` | Optional read-only replica |
 | `REDIS_URL` | Optional shared cache and job queue |
+| `SCIENTIFIC_JOB_TYPES` | Worker queue assignment (`nmds` or `modern_analogue`) |
 | `CORS_ORIGINS` | Allowed frontend origins |
 | `WEB_CONCURRENCY` | API process count; Compose uses `2` |
 | `DATABASE_POOL_SIZE` | Connections per process; Compose uses `4` |
@@ -461,7 +474,7 @@ psql "$DATABASE_URL" -f scripts/explain_runtime_queries.sql
 ## Production deployment
 
 - Host PostgreSQL and Redis on durable private services.
-- Run API and worker containers from the same backend image.
+- Run API and the separate NMDS and analogue worker containers from the same backend image.
 - Keep Redis and PostgreSQL off the public internet.
 - Store URLs and credentials in deployment secrets.
 - Set `CORS_ORIGINS` to the production frontend origin.
@@ -490,9 +503,9 @@ same command or use the Docker backend service.
 
 ```bash
 docker compose exec redis redis-cli ping
-docker compose logs --tail=100 worker redis
+docker compose logs --tail=100 worker-analogue worker-nmds redis
 docker inspect -f 'status={{.State.Status}} restarts={{.RestartCount}}' \
-  "$(docker compose ps -q worker)"
+  "$(docker compose ps -q worker-analogue)"
 ```
 
 The current worker uses a dedicated blocking Redis connection; rebuild the
@@ -500,7 +513,7 @@ backend image after pulling worker fixes:
 
 ```bash
 docker compose build backend
-docker compose up -d --force-recreate backend worker
+docker compose up -d --force-recreate backend worker-analogue worker-nmds
 ```
 
 ### Docker Buildx permission denied
@@ -540,7 +553,7 @@ Stop the old process or choose another port and update `VITE_API_URL`.
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 postgres redis backend worker
+docker compose logs --tail=100 postgres redis backend worker-analogue worker-nmds
 ```
 
 ## Authors and acknowledgements

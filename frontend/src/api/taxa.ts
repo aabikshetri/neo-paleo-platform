@@ -266,6 +266,7 @@ export async function findModernAnalogues(
   excludeSameSite = true,
   excludeSameDoi = true,
   selectionToken?: string | null,
+  signal?: AbortSignal,
 ): Promise<AnalogueResult> {
   const response = await axios.post(`${API}/jobs/modern-analogues`, {
     target_sampleid: targetSampleid,
@@ -275,18 +276,30 @@ export async function findModernAnalogues(
     limit,
     exclude_same_site: excludeSameSite,
     exclude_same_doi: excludeSameDoi,
-  });
-  return awaitAnalysisJob<AnalogueResult>(response.data);
+  }, { signal });
+  return awaitAnalysisJob<AnalogueResult>(response.data, signal);
 }
 
-async function awaitAnalysisJob<T>(submission: any): Promise<T> {
+async function awaitAnalysisJob<T>(submission: any, signal?: AbortSignal): Promise<T> {
   if (submission.status === "complete") return submission.result;
   const jobId = submission.job_id;
   for (let attempt = 0; attempt < 240; attempt += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
-    const status = await axios.get(`${API}/jobs/${jobId}`);
+    if (signal?.aborted) throw new DOMException("Analysis request cancelled", "AbortError");
+    await new Promise<void>((resolve, reject) => {
+      const abort = () => {
+        window.clearTimeout(timer);
+        reject(new DOMException("Analysis request cancelled", "AbortError"));
+      };
+      const timer = window.setTimeout(() => {
+        signal?.removeEventListener("abort", abort);
+        resolve();
+      }, 500);
+      signal?.addEventListener("abort", abort, { once: true });
+    });
+    const status = await axios.get(`${API}/jobs/${jobId}`, { signal });
     if (status.data.status === "complete") return status.data.result;
     if (status.data.status === "failed") throw new Error(status.data.detail || "Analysis job failed");
+    if (status.data.status === "cancelled") throw new DOMException("Analysis request cancelled", "AbortError");
     if (status.data.status === "not_found") throw new Error("Analysis job expired or was not found");
   }
   throw new Error("Analysis job did not finish within two minutes");
@@ -304,6 +317,7 @@ export async function runNmds(
     runSensitivity: boolean;
   },
   selectionToken?: string | null,
+  signal?: AbortSignal,
 ): Promise<NmdsResult> {
   const response = await axios.post(`${API}/jobs/nmds`, {
     ...selectionPayload(sampleids, selectionToken),
@@ -314,6 +328,6 @@ export async function runNmds(
     dimensions: settings.dimensions,
     target_sampleid: settings.targetSampleid,
     run_sensitivity: settings.runSensitivity,
-  });
-  return awaitAnalysisJob<NmdsResult>(response.data);
+  }, { signal });
+  return awaitAnalysisJob<NmdsResult>(response.data, signal);
 }
