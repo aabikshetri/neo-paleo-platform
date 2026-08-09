@@ -471,27 +471,6 @@ psql "$DATABASE_URL" -f scripts/explain_runtime_queries.sql
 
 `EXPLAIN ANALYZE` executes queries. The included examples are read-only.
 
-## Production deployment
-
-- Host PostgreSQL and Redis on durable private services.
-- Run API and the separate NMDS and analogue worker containers from the same backend image.
-- Keep Redis and PostgreSQL off the public internet.
-- Store URLs and credentials in deployment secrets.
-- Set `CORS_ORIGINS` to the production frontend origin.
-- Build the frontend with the public backend `VITE_API_URL`.
-- Place the API behind HTTPS and a reverse proxy/load balancer.
-- Monitor worker queue length, Redis memory, database pool usage, replica lag,
-  request errors, and p95/p99 latency.
-
-The included `frontend/vercel.json` gives content-hashed frontend assets a
-one-year immutable CDN lifetime. Give a changed logo a new filename before
-deployment so browsers do not retain an older immutable copy.
-
-For a read replica, keep `DATABASE_URL` pointed at the primary and set
-`READ_DATABASE_URL` to the replica. Search and analysis reads use the replica;
-refresh-version checks use the primary. Monitor replica lag and fail reads back
-to the primary if necessary.
-
 ## Troubleshooting
 
 ### Backend says `data_source: csv`
@@ -514,27 +493,6 @@ backend image after pulling worker fixes:
 ```bash
 docker compose build backend
 docker compose up -d --force-recreate backend worker-analogue worker-nmds
-```
-
-### Docker Buildx permission denied
-
-Do not run Docker with `sudo`. On macOS, repair files previously created as
-root:
-
-```bash
-sudo chown -R "$(id -un)":staff "$HOME/.docker/buildx"
-```
-
-Then restart Docker Desktop.
-
-### Docker returns HTTP 500 or incomplete JSON
-
-Check that Docker Desktop is running and that the computer has adequate free
-disk space:
-
-```bash
-docker info
-df -h /System/Volumes/Data
 ```
 
 Restart Docker Desktop. Do not factory-reset Docker or remove volumes unless
