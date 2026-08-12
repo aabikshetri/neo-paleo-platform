@@ -26,7 +26,9 @@ export default function ScatterPlot(
       ]}
       layout={{
         title:
-          `${yField} vs ${xField}`
+          `${yField} vs ${xField}`,
+        xaxis: { zeroline: false },
+        yaxis: { zeroline: false },
       }}
     />
   );

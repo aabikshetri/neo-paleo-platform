@@ -223,14 +223,14 @@ export default function TaxaCompositionChart(props: Props) {
               plot_bgcolor: "transparent",
               ...(dimensions === 3 ? {
                 scene: {
-                  xaxis: { title: { text: "pH" } },
-                  yaxis: { title: { text: "Water-table depth" } },
-                  zaxis: { title: { text: aggregation === "combined" ? "Combined composition (%)" : "Cumulative selected composition (%)" }, rangemode: "tozero" },
+                  xaxis: { title: { text: "pH" }, zeroline: false },
+                  yaxis: { title: { text: "Water-table depth" }, zeroline: false },
+                  zaxis: { title: { text: aggregation === "combined" ? "Combined composition (%)" : "Cumulative selected composition (%)" }, rangemode: "tozero", zeroline: false },
                   camera: { eye: { x: 1.55, y: 1.45, z: 1.15 } },
                 },
               } : {
-                xaxis: { title: { text: "Water-table depth" } },
-                yaxis: { title: { text: "pH" } },
+                xaxis: { title: { text: "Water-table depth" }, zeroline: false },
+                yaxis: { title: { text: "pH" }, zeroline: false },
               }),
             }}
             config={{ responsive: true, displaylogo: false }}
@@ -296,8 +296,8 @@ export default function TaxaCompositionChart(props: Props) {
                 y: -0.28,
                 yanchor: "top",
               },
-              xaxis: { title: { text: responseVariable === "pH" ? "pH" : "Water-table depth" } },
-              yaxis: { title: { text: "Combined abundance (%)" }, rangemode: "tozero" },
+              xaxis: { title: { text: responseVariable === "pH" ? "pH" : "Water-table depth" }, zeroline: false },
+              yaxis: { title: { text: "Combined abundance (%)" }, rangemode: "tozero", zeroline: false },
               paper_bgcolor: "transparent",
               plot_bgcolor: "transparent",
             }}

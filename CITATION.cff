@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use AmoebaScope in your research, please cite it using the metadata below."
+type: software
+title: "AmoebaScope"
+abstract: "Exploration and visualization of testate amoeba ecology and paleoecology using the Neotoma Paleoecology Database."
+authors:
+  - given-names: "Aabiskar"
+    family-names: "Thapa Kshetri"
+  - given-names: "Robert K."
+    family-names: "Booth"
+version: "0.1.0-beta"
+date-released: 2026-08-12
+license: MIT
+repository-code: "https://github.com/aabikshetri/neo-paleo-platform"
+keywords:
+  - "testate amoebae"
+  - "paleoecology"
+  - "ecology"
+  - "Neotoma Paleoecology Database"
+  - "data visualization"
