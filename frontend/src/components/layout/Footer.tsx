@@ -1,4 +1,6 @@
 const repositoryUrl = "https://github.com/aabikshetri/neo-paleo-platform";
+const versionDoiUrl = "https://doi.org/10.5281/zenodo.21907651";
+const conceptDoiUrl = "https://doi.org/10.5281/zenodo.21907650";
 
 export default function Footer() {
   return (
@@ -47,16 +49,19 @@ export default function Footer() {
               AmoebaScope: Exploration and visualization of testate amoeba ecology and
               paleoecology using the Neotoma Paleoecology Database
             </em>{" "}
-            (Version 1.5.0-beta) [Computer software].
+            (Version 1.5.0-beta) [Computer software].{" "}
+            <a href={versionDoiUrl} target="_blank" rel="noreferrer">
+              https://doi.org/10.5281/zenodo.21907651
+            </a>
           </p>
-          <a
-            className="site-footer__citation-link"
-            href={`${repositoryUrl}/blob/main/CITATION.cff`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            View CITATION.cff <span aria-hidden="true">↗</span>
-          </a>
+          <div className="site-footer__citation-links">
+            <a href={conceptDoiUrl} target="_blank" rel="noreferrer">
+              All versions DOI <span aria-hidden="true">↗</span>
+            </a>
+            <a href={`${repositoryUrl}/blob/main/CITATION.cff`} target="_blank" rel="noreferrer">
+              View CITATION.cff <span aria-hidden="true">↗</span>
+            </a>
+          </div>
         </div>
       </details>
     </footer>

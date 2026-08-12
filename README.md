@@ -1,5 +1,7 @@
 # AmoebaScope
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21907650.svg)](https://doi.org/10.5281/zenodo.21907650)
+
 **Exploration and visualization of testate amoeba ecology and paleoecology using the Neotoma Paleoecology Database.**
 
 AmoebaScope is a web application for filtering, visualizing, analyzing, and
@@ -513,6 +515,19 @@ Stop the old process or choose another port and update `VITE_API_URL`.
 docker compose ps
 docker compose logs --tail=100 postgres redis backend worker-analogue worker-nmds
 ```
+
+## Citation
+
+If you use AmoebaScope in your research, please cite the archived software release:
+
+> Thapa Kshetri, A., & Booth, R. K. (2026). *AmoebaScope: Exploration and
+> visualization of testate amoeba ecology and paleoecology using the Neotoma
+> Paleoecology Database* (Version 1.5.0-beta) [Computer software].
+> https://doi.org/10.5281/zenodo.21907651
+
+Use the [concept DOI](https://doi.org/10.5281/zenodo.21907650) to reference
+AmoebaScope generally across all versions. See [`CITATION.cff`](CITATION.cff)
+for machine-readable citation metadata.
 
 ## Authors and acknowledgements
 

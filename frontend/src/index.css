@@ -175,8 +175,11 @@ body {
   background: var(--bg);
 }
 
-.site-footer__citation-link {
+.site-footer__citation-links {
+  display: grid;
+  gap: 5px;
   flex: 0 0 auto;
+  text-align: right;
   font-weight: 600;
 }
 
@@ -193,6 +196,10 @@ body {
   .site-footer__citation-content {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .site-footer__citation-links {
+    text-align: left;
   }
 }
 

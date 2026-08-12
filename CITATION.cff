@@ -10,6 +10,8 @@ authors:
     family-names: "Booth"
 version: "1.5.0-beta"
 date-released: 2026-08-12
+doi: "10.5281/zenodo.21907651"
+url: "https://doi.org/10.5281/zenodo.21907650"
 license: MIT
 repository-code: "https://github.com/aabikshetri/neo-paleo-platform"
 keywords:
