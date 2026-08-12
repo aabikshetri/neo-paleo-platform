@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use AmoebaScope in your research, please cite it using the metadata below."
 type: software
-title: "AmoebaScope"
-abstract: "Exploration and visualization of testate amoeba ecology and paleoecology using the Neotoma Paleoecology Database."
+title: "AmoebaScope: Exploration and visualization of testate amoeba ecology and paleoecology using the Neotoma Paleoecology Database"
+abstract: "AmoebaScope is an interactive research platform for exploring and visualizing the ecology and paleoecology of testate amoebae. It provides tools for examining surface-sample distributions, community composition, environmental gradients, and ecological relationships using data from the Neotoma Paleoecology Database."
 authors:
   - given-names: "Aabiskar"
     family-names: "Thapa Kshetri"
