@@ -47,7 +47,7 @@ export default function Footer() {
               AmoebaScope: Exploration and visualization of testate amoeba ecology and
               paleoecology using the Neotoma Paleoecology Database
             </em>{" "}
-            (Version 0.1.0-beta) [Computer software].
+            (Version 1.5.0-beta) [Computer software].
           </p>
           <a
             className="site-footer__citation-link"
