@@ -42,7 +42,11 @@ export default function Footer() {
         </summary>
         <div className="site-footer__citation-content">
           <p>
-            Thapa Kshetri, A., &amp; Booth, R. K. (2026). <em>AmoebaScope</em>{" "}
+            Thapa Kshetri, A., &amp; Booth, R. K. (2026).{" "}
+            <em>
+              AmoebaScope: Exploration and visualization of testate amoeba ecology and
+              paleoecology using the Neotoma Paleoecology Database
+            </em>{" "}
             (Version 0.1.0-beta) [Computer software].
           </p>
           <a
