@@ -31,6 +31,7 @@ from backend.runtime import df, taxa_df, dataset_publications_df, taxon_profiles
 from backend.schemas.requests import (
     AnalogueRequest,
     CalibrationRequest,
+    FossilAnalogueRequest,
     NmdsRequest,
     SampleProfilesRequest,
     TaxaAggregateRequest,
@@ -560,6 +561,124 @@ def modern_analogues(request: AnalogueRequest):
             "water_table_depth_units": None if pd.isna(target_metadata.get("water_table_depth_units")) else target_metadata.get("water_table_depth_units"),
         },
         "target_composition": composition_records(target),
+        "matches": matches,
+    }
+
+
+def fossil_analogue_class(distance: float) -> str:
+    """Non-overlapping Booth et al. (2025) categories supplied by collaborators."""
+    if distance < 0.30:
+        return "excellent"
+    if distance < 0.38:
+        return "very_good"
+    if distance <= 0.45:
+        return "good"
+    if distance <= 0.54:
+        return "possible"
+    return "poor"
+
+
+def fossil_modern_analogues(request: FossilAnalogueRequest):
+    """Compare one harmonized fossil assemblage with the filtered modern set."""
+    candidate_ids = _request_ids(request)
+    target_values: dict[str, float] = {}
+    modern_groups: dict[str, str] = {}
+    for item in request.composition:
+        taxon = item.taxon.strip()
+        for modern_taxon in item.modern_taxa:
+            modern_taxon = modern_taxon.strip()
+            if not modern_taxon:
+                continue
+            if modern_taxon in modern_groups and modern_groups[modern_taxon] != taxon:
+                return {"error": f"Modern taxon {modern_taxon} is linked to multiple fossil groups.", "matches": []}
+            modern_groups[modern_taxon] = taxon
+        if taxon and item.percentage > 0:
+            target_values[taxon] = target_values.get(taxon, 0.0) + item.percentage
+
+    target_total = sum(target_values.values())
+    if target_total <= 0:
+        return {"error": "The fossil sample has no mapped taxa with positive abundance.", "matches": []}
+    target = pd.Series({taxon: value * 100 / target_total for taxon, value in target_values.items()})
+
+    selected = taxon_profiles_df[
+        taxon_profiles_df["sampleid"].isin(candidate_ids)
+    ]
+    if selected.empty:
+        return {"error": "No filtered modern samples contain the mapped fossil taxa.", "matches": []}
+
+    # Sum selected modern names into the same fossil group before normalization.
+    # Prefix keys keep unmapped modern taxa separate from fossil group labels.
+    target.index = [f"group:{taxon}" for taxon in target.index]
+    selected = selected.copy()
+    selected["lumped_taxon"] = selected["lumped_taxon"].map(
+        lambda taxon: f"group:{modern_groups[taxon]}" if taxon in modern_groups
+        else f"modern:{taxon}" if modern_groups else f"group:{taxon}"
+    )
+    selected = selected.groupby(["sampleid", "lumped_taxon"], as_index=False)["percentage"].sum()
+
+    matrix = selected.pivot_table(
+        index="sampleid", columns="lumped_taxon", values="percentage", fill_value=0
+    ).reindex(columns=sorted(set(selected["lumped_taxon"]) | set(target.index)), fill_value=0)
+    target = target.reindex(matrix.columns, fill_value=0)
+    row_totals = matrix.sum(axis=1)
+    matrix = matrix.loc[row_totals > 0]
+    row_totals = row_totals.loc[matrix.index]
+    matrix = matrix.div(row_totals, axis=0) * 100
+    if matrix.empty:
+        return {"error": "No filtered modern samples have usable mapped composition.", "matches": []}
+
+    distances = matrix.sub(target, axis="columns").abs().sum(axis=1) / 200
+    best = distances.nsmallest(max(1, min(request.limit, 25)))
+    metadata = (
+        df[df["sampleid"].isin(best.index)]
+        .drop_duplicates("sampleid")
+        .set_index("sampleid")
+    )
+
+    def composition_records(values, limit=10):
+        return [
+            {"lumped_taxon": str(taxon).split(":", 1)[1], "percentage": float(percentage)}
+            for taxon, percentage in values[values > 0].nlargest(limit).items()
+        ]
+
+    matches = []
+    for sampleid, distance in best.items():
+        candidate = matrix.loc[sampleid]
+        shared = pd.concat([target.rename("target"), candidate.rename("candidate")], axis=1).fillna(0)
+        shared["minimum"] = shared[["target", "candidate"]].min(axis=1)
+        row = metadata.loc[sampleid] if sampleid in metadata.index else None
+
+        def metadata_value(column):
+            if row is None or column not in row or pd.isna(row[column]):
+                return None
+            value = row[column]
+            return value.item() if hasattr(value, "item") else value
+
+        matches.append({
+            "sampleid": int(sampleid),
+            "bray_curtis": float(distance),
+            "analogue_class": fossil_analogue_class(float(distance)),
+            "sitename": metadata_value("sitename"),
+            "datasetid": metadata_value("datasetid"),
+            "doi": metadata_value("doi"),
+            "pH": metadata_value("pH"),
+            "water_table_depth": metadata_value("water_table_depth"),
+            "water_table_depth_units": metadata_value("water_table_depth_units"),
+            "delta_pH": None,
+            "delta_water_table_depth": None,
+            "shared_taxa": [str(taxon).split(":", 1)[1] for taxon in shared[shared["minimum"] > 0].nlargest(5, "minimum").index],
+            "composition": composition_records(candidate),
+        })
+
+    return {
+        "candidate_count": int(len(matrix)),
+        "category_counts": {category: sum(fossil_analogue_class(float(value)) == category for value in distances)
+                            for category in ("excellent", "very_good", "good", "possible", "poor")},
+        "good_or_better_count": int((distances <= 0.45).sum()),
+        "threshold_reference": "Booth et al. (2025); thresholds supplied by project collaborators",
+        "excluded_candidate_count": int(len(candidate_ids) - len(matrix)),
+        "method": "Bray-Curtis dissimilarity after taxonomic harmonization and normalization of full modern assemblages and mapped fossil TEAM taxa",
+        "target_composition": composition_records(target, limit=len(target)),
         "matches": matches,
     }
 

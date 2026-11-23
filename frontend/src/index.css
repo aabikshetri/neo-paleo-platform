@@ -279,6 +279,73 @@ body {
   white-space: nowrap;
 }
 
+.fossil-summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+.fossil-summary span {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--social-bg);
+}
+
+.fossil-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.3fr) minmax(220px, 1fr) minmax(190px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 22px;
+}
+
+.fossil-controls label,
+.fossil-age {
+  display: grid;
+  gap: 5px;
+}
+
+.fossil-age small {
+  opacity: 0.72;
+}
+
+.fossil-harmonizer {
+  max-height: 480px;
+  overflow: auto;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.fossil-harmonizer thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+}
+
+.fossil-harmonizer select {
+  width: min(100%, 330px);
+}
+
+.fossil-compare-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+@media (max-width: 900px) {
+  .fossil-controls {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+}
+
 @media (max-width: 640px) {
   .analysis-group__content,
   .analysis-panel {
@@ -369,3 +436,12 @@ code {
   padding: 8px 10px;
   opacity: 0.7;
 }
+
+.modern-taxa-picker { min-width: 260px; max-width: 480px; }
+.modern-taxa-picker summary { cursor: pointer; padding: 7px 10px; border: 1px solid #64748b; border-radius: 6px; overflow-wrap: anywhere; }
+.modern-taxa-options { padding: 10px 0; }
+.modern-taxa-options > input { width: 100%; box-sizing: border-box; margin-bottom: 8px; }
+.modern-taxa-checkboxes { max-height: 240px; overflow-y: auto; margin-top: 8px; }
+.modern-taxa-checkboxes label { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; }
+.modern-taxa-checkboxes input { flex-shrink: 0; }
+.modern-taxa-checkboxes small { opacity: .7; }

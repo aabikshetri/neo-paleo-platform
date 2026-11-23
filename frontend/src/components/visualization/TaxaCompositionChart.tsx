@@ -275,15 +275,6 @@ export default function TaxaCompositionChart(props: Props) {
                 name: selectedLabel,
                 marker: { color: taxonColor(displayedTaxa[0]), opacity: 0.75, size: 8 },
               },
-              ...(optimum == null ? [] : [{
-                x: [optimum, optimum],
-                y: [0, Math.max(...responseRows.map((item) => item.abundance), 1)],
-                mode: "lines" as const,
-                type: "scattergl" as const,
-                name: "Weighted optimum",
-                line: { color: taxonColor(displayedTaxa[0]), dash: "dash", width: 2 },
-                hovertemplate: `Weighted optimum: ${optimum.toFixed(2)}<extra></extra>`,
-              }]),
             ]}
             layout={{
               autosize: true,

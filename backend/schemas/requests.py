@@ -37,6 +37,17 @@ class AnalogueRequest(BaseModel):
     exclude_same_doi: bool = True
 
 
+class FossilCompositionItem(BaseModel):
+    taxon: str
+    percentage: float = Field(ge=0)
+    modern_taxa: list[str] = Field(default_factory=list)
+
+
+class FossilAnalogueRequest(SelectionRequest):
+    composition: list[FossilCompositionItem]
+    limit: int = 10
+
+
 class NmdsRequest(SelectionRequest):
     max_samples: int = 500
     prevalence: float = 0.02

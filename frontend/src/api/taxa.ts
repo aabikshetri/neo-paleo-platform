@@ -36,7 +36,7 @@ export type CalibrationQuality = {
 export type AnalogueMatch = {
   sampleid: number;
   bray_curtis: number;
-  analogue_class: "close" | "possible" | "poor";
+  analogue_class: "close" | "excellent" | "very_good" | "good" | "possible" | "poor";
   sitename?: string | null;
   datasetid?: number | null;
   doi?: string | null;
@@ -50,6 +50,9 @@ export type AnalogueMatch = {
 };
 
 export type AnalogueResult = {
+  category_counts?: Record<string, number>;
+  good_or_better_count?: number;
+  threshold_reference?: string;
   target_sampleid?: number;
   candidate_count?: number;
   excluded_candidate_count?: number;
@@ -278,6 +281,21 @@ export async function findModernAnalogues(
     exclude_same_doi: excludeSameDoi,
   }, { signal });
   return awaitAnalysisJob<AnalogueResult>(response.data, signal);
+}
+
+export async function compareFossilToModern(
+  composition: Array<{ taxon: string; percentage: number; modern_taxa?: string[] }>,
+  calibrationSampleids: number[],
+  limit = 10,
+  selectionToken?: string | null,
+  signal?: AbortSignal,
+): Promise<AnalogueResult> {
+  const response = await axios.post(`${API}/calibration/fossil-modern-analogues`, {
+    ...selectionPayload(calibrationSampleids, selectionToken),
+    composition,
+    limit,
+  }, { signal });
+  return response.data;
 }
 
 async function awaitAnalysisJob<T>(submission: any, signal?: AbortSignal): Promise<T> {

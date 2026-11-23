@@ -16,8 +16,10 @@ const SiteMap = lazy(() => import("../components/visualization/SiteMap"));
 const TaxaCompositionChart = lazy(() => import("../components/visualization/TaxaCompositionChart"));
 const LinkedEnvironmentalExplorer = lazy(() => import("../components/visualization/LinkedEnvironmentalExplorer"));
 const ModernAnalogueSearch = lazy(() => import("../components/analysis/ModernAnalogueSearch"));
+const FossilAnalogueSearch = lazy(() => import("../components/analysis/FossilAnalogueSearch"));
 const CommunityNmds = lazy(() => import("../components/analysis/CommunityNmds"));
-const ReproducibilityPanel = lazy(() => import("../components/analysis/ReproducibilityPanel"));
+// Reproducibility is temporarily hidden from the frontend.
+// const ReproducibilityPanel = lazy(() => import("../components/analysis/ReproducibilityPanel"));
 
 function FeatureFallback() {
   return <p className="feature-loading">Loading visualization…</p>;
@@ -73,8 +75,8 @@ export default function DatasetExplorer() {
   const [taxaRows, setTaxaRows] = useState<any[]>([]);
   const [taxaLoading, setTaxaLoading] = useState(false);
   const [explorationOpen, setExplorationOpen] = useState(false);
-  const [analogueSnapshot, setAnalogueSnapshot] = useState<Record<string, unknown> | null>(null);
-  const [nmdsSnapshot, setNmdsSnapshot] = useState<Record<string, unknown> | null>(null);
+  const [, setAnalogueSnapshot] = useState<Record<string, unknown> | null>(null);
+  const [, setNmdsSnapshot] = useState<Record<string, unknown> | null>(null);
   const [selectionToken, setSelectionToken] = useState("");
   const [baselineSelectionToken, setBaselineSelectionToken] = useState("");
   const [resultTotal, setResultTotal] = useState(0);
@@ -258,6 +260,11 @@ export default function DatasetExplorer() {
         defaultOpen
       >
         <div className="analysis-panel">
+          <Suspense fallback={<FeatureFallback />}>
+            <FossilAnalogueSearch rows={selectedRows} selectionToken={bbox ? null : selectionToken} />
+          </Suspense>
+        </div>
+        <div className="analysis-panel">
           <CalibrationQualityPanel rows={selectedRows} selectionToken={bbox ? null : selectionToken} />
         </div>
       </AnalysisGroup>
@@ -397,6 +404,7 @@ export default function DatasetExplorer() {
         </div>
       </AnalysisGroup>
 
+      {/* Reproducibility is temporarily hidden from the frontend.
       <AnalysisGroup
         title="Reproducibility"
         description="Record the active dataset selection, methods, diagnostics, and results."
@@ -413,6 +421,7 @@ export default function DatasetExplorer() {
           </Suspense>
         </div>
       </AnalysisGroup>
+      */}
     </div>
   );
 }
